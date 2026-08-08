@@ -1,0 +1,98 @@
+package dev.cajeta.cloud.stream;
+
+import cajeta.collection.ArrayList;
+import cajeta.concurrent.AtomicInt64;
+import cajeta.concurrent.Lock;
+import cajeta.lang.String;
+import dev.cajeta.cloud.CloudException;
+import dev.cajeta.cloud.CloudStats;
+
+/**
+ * The memory stream driver's shared guts — cursors hold THIS, never
+ * the MemoryStream, for the same reason MemState exists on the object
+ * side: a back-reference to the interface-implementing class is a
+ * drop-synthesis cycle that SIGSEGVs the v0.17.4 compiler (registered
+ * as drop-synthesis-backref-cycle).
+ */
+final class StreamState {
+
+    Lock lock;
+    ArrayList<Sub> subs;
+    AtomicInt64 seq;               // logical clock + position source
+    CloudStats statsObj;
+    int32 throttleOnce;            // test hook: next read rate-limits
+
+    StreamState() {
+        this.lock = heap Lock();
+        this.subs = heap ArrayList<Sub>();
+        this.seq = heap AtomicInt64((int64) 0);
+        this.statsObj = heap CloudStats();
+        this.throttleOnce = 0;
+        return;
+    }
+
+    /** Index of sub-stream `id`, or −1. */
+    int32 findSub(String id) {
+        int32 i = 0;
+        while (i < this.subs.count()) {
+            if (this.subs.get(i).id.equals(id)) { return i; }
+            i = i + 1;
+        }
+        return -1;
+    }
+
+    /** The sub, or a NOT_FOUND failure naming it. */
+    Sub subOrThrow(String id, String operation) {
+        int32 at = this.findSub(id);
+        if (at < 0) {
+            throw heap CloudException(CloudException.NOT_FOUND(),
+                "memory-stream", operation, id, "no such sub-stream");
+        }
+        return this.subs.get(at);
+    }
+
+    /**
+     * The opaque position token for index `idx` of sub `subId`.
+     * Deliberately NOT an integer rendering (§12.2.1): consumers store
+     * and hand it back; only this driver parses it.
+     */
+    static #String token(String subId, int64 idx) {
+        String out = "pos@" + subId + "@" + idx;
+        return #out;
+    }
+
+    /**
+     * Parse one of OUR tokens back to an index, validating it belongs
+     * to `subId`. A foreign or mangled token is an explicit failure,
+     * never a silent seek.
+     */
+    static int64 parseToken(String tok, String subId) {
+        String want = "pos@" + subId + "@";
+        if (!tok.startsWith(want)) {
+            throw heap CloudException(CloudException.PROVIDER_ERROR(),
+                "memory-stream", "openCursor", subId,
+                "position token '" + tok + "' does not belong to this "
+                + "sub-stream");
+        }
+        int32 from = want.byteLength();
+        int32 n = tok.byteLength();
+        if (from >= n) {
+            throw heap CloudException(CloudException.PROVIDER_ERROR(),
+                "memory-stream", "openCursor", subId,
+                "empty position token index");
+        }
+        int64 idx = 0;
+        int32 i = from;
+        while (i < n) {
+            int32 d = ((int32) tok.byteAt(i)) - 48;
+            if (d < 0 || d > 9) {
+                throw heap CloudException(CloudException.PROVIDER_ERROR(),
+                    "memory-stream", "openCursor", subId,
+                    "malformed position token '" + tok + "'");
+            }
+            idx = idx * 10 + (int64) d;
+            i = i + 1;
+        }
+        return idx;
+    }
+}

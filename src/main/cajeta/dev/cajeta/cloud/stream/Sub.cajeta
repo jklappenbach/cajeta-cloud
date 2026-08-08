@@ -1,0 +1,21 @@
+package dev.cajeta.cloud.stream;
+
+import cajeta.collection.ArrayList;
+import cajeta.lang.String;
+
+/** Package-private sub-stream state for the memory stream driver. */
+final class Sub {
+
+    String id;
+    boolean open;
+    ArrayList<String> successors;
+    ArrayList<Rec> events;
+
+    Sub(#String id) {
+        this.id #= id;
+        this.open = true;
+        this.successors = heap ArrayList<String>();
+        this.events = heap ArrayList<Rec>();
+        return;
+    }
+}

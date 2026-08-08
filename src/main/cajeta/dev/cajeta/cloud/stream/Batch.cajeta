@@ -1,0 +1,37 @@
+package dev.cajeta.cloud.stream;
+
+import cajeta.collection.ArrayList;
+import cajeta.lang.String;
+
+/**
+ * One consumption batch (spec §12.5.1–§12.5.2): the events, the
+ * position token to STORE for resumption (the port never stores it —
+ * §12.5.2), and whether the sub-stream is CLOSED AND DRAINED — the
+ * signal to fetch successors (§12.3.3). `closed` only turns true once
+ * every record has been delivered, so nothing is ever skipped.
+ */
+public final class Batch {
+
+    ArrayList<Event> eventList;
+    String next;
+    public boolean closed;
+
+    Batch(#ArrayList<Event> events, #String nextPosition,
+          boolean closed) {
+        this.eventList #= events;
+        this.next #= nextPosition;
+        this.closed = closed;
+        return;
+    }
+
+    public int32 count() { return this.eventList.count(); }
+
+    /** Borrow of event `i` on this batch. */
+    public Event eventAt(int32 i) { return this.eventList.get(i); }
+
+    /** The opaque token to store for resumption. */
+    public #String nextPosition() {
+        String out = "" + this.next;
+        return #out;
+    }
+}

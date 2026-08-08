@@ -1,0 +1,247 @@
+package dev.cajeta.cloud.selftest;
+
+import dev.cajeta.unit.Assert;
+import dev.cajeta.cloud.Caps;
+import dev.cajeta.cloud.CloudException;
+import dev.cajeta.cloud.stream.Batch;
+import dev.cajeta.cloud.stream.Event;
+import dev.cajeta.cloud.stream.MemoryStream;
+import dev.cajeta.cloud.stream.StartAt;
+import dev.cajeta.cloud.stream.StreamCursor;
+import dev.cajeta.cloud.stream.SubStreamInfo;
+
+/**
+ * cajeta-cloud U7 — the stream port against the memory driver:
+ * positions are opaque tokens the PORT never stores (7.1.1, 7.1.7,
+ * 7.1.9), the sub-stream set is dynamic across a reshard with
+ * closed-stream drain before successors so no record is skipped
+ * (7.1.2–7.1.4), all four starting positions work (7.1.5), batches
+ * carry the full §12.5.1 payload (7.1.6), rate limits surface
+ * transient with retry guidance (7.1.8), and Kafka-only powers are
+ * declared, not assumed (7.1.10).
+ */
+public class StreamTest {
+
+    public StreamTest() { return; }
+
+    static #int8[] pay(String s) {
+        return s.toBytes();
+    }
+
+    static #String text(int8[] b) {
+        int8[] copy = heap int8[(int64) b.count()];
+        int64 i = 0;
+        while (i < (int64) copy.count()) { copy[i] = b[i]; i = i + 1; }
+        String s = heap String(#copy, (int32) b.count());
+        return #s;
+    }
+
+    // 7.1.1 + 7.1.7 + 7.1.9 — the position is an opaque String token:
+    // store it, hand it back later, consumption resumes exactly there;
+    // it never expires (cursor lifecycle is the adapter's problem) and
+    // the port holds no consumer state (a fresh from-oldest cursor
+    // re-reads everything).
+    @Test
+    public void opaquePositionRoundtrip() {
+        MemoryStream ms = heap MemoryStream(1);
+        int8[] p1 = StreamTest.pay("one");
+        int8[] p2 = StreamTest.pay("two");
+        int8[] p3 = StreamTest.pay("three");
+        String q1 = ms.publish(p1, "");
+        String q2 = ms.publish(p2, "");
+        String q3 = ms.publish(p3, "");
+        StreamCursor c = ms.openCursor("s0", StartAt.oldest());
+        Batch b1 = c.next((int64) 2);
+        Assert.equals((int64) 2, (int64) b1.count());
+        String stored = b1.nextPosition();          // the caller stores it
+        c.close();
+        // Later, elsewhere: resume from the stored token.
+        StreamCursor c2 = ms.openCursor("s0", StartAt.position(stored));
+        Batch b2 = c2.next((int64) 10);
+        Assert.equals((int64) 1, (int64) b2.count());
+        Assert.isTrue(StreamTest.text(b2.eventAt(0).payload)
+            .equals("three"));
+        // The port stored nothing: from-oldest still sees all three.
+        StreamCursor c3 = ms.openCursor("s0", StartAt.oldest());
+        Assert.equals((int64) 3, (int64) c3.next((int64) 10).count());
+    }
+
+    // 7.1.2 — the sub-stream set is the CURRENTLY OPEN set.
+    @Test
+    public void subStreamSetIsDynamic() {
+        MemoryStream ms = heap MemoryStream(2);
+        String[] before = ms.subStreamIds();
+        Assert.equals((int64) 2, (int64) before.count());
+        ms.split("s0");
+        String[] after = ms.subStreamIds();
+        Assert.equals((int64) 3, (int64) after.count());  // s1, s0.0, s0.1
+        int32 i = 0;
+        boolean sawClosed = false;
+        while (i < (int32) after.count()) {
+            if (after[i].equals("s0")) { sawClosed = true; }
+            i = i + 1;
+        }
+        Assert.isFalse(sawClosed);
+    }
+
+    // 7.1.3 + 7.1.4 — a reshard: the closed sub-stream reports its
+    // successors, drains to its END before they take over, and not one
+    // record is lost across the boundary.
+    @Test
+    public void reshardDrainsThenFollowsSuccessors() {
+        MemoryStream ms = heap MemoryStream(1);
+        int8[] a = StreamTest.pay("pre-1");
+        int8[] b = StreamTest.pay("pre-2");
+        String q1 = ms.publish(a, "k");
+        String q2 = ms.publish(b, "k");
+        ms.split("s0");
+        int8[] c = StreamTest.pay("post-1");
+        int8[] d = StreamTest.pay("post-2");
+        String q3 = ms.publish(c, "k");
+        String q4 = ms.publish(d, "x");
+        // The closed stream still drains fully, then reports closed.
+        StreamCursor cur = ms.openCursor("s0", StartAt.oldest());
+        Batch drain = cur.next((int64) 10);
+        Assert.equals((int64) 2, (int64) drain.count());
+        Assert.isTrue(drain.closed);
+        // Successors are obtainable from the closed stream's info.
+        SubStreamInfo info = ms.describe("s0");
+        Assert.isFalse(info.open);
+        Assert.equals((int64) 2, (int64) info.successorCount());
+        // Every post-split record is on some successor: total in =
+        // total out.
+        int64 got = 0;
+        int32 s = 0;
+        while (s < info.successorCount()) {
+            StreamCursor sc = ms.openCursor(info.successorAt(s),
+                StartAt.oldest());
+            got = got + (int64) sc.next((int64) 10).count();
+            s = s + 1;
+        }
+        Assert.equals((int64) 2, got);
+    }
+
+    // 7.1.5 — oldest / newest / stored position / timestamp all work.
+    @Test
+    public void allFourStartingPositions() {
+        MemoryStream ms = heap MemoryStream(1);
+        int8[] e1 = StreamTest.pay("e1");
+        int8[] e2 = StreamTest.pay("e2");
+        int8[] e3 = StreamTest.pay("e3");
+        int8[] e4 = StreamTest.pay("e4");
+        String q1 = ms.publish(e1, "");
+        String q2 = ms.publish(e2, "");
+        String q3 = ms.publish(e3, "");
+        String q4 = ms.publish(e4, "");
+        // oldest
+        StreamCursor c1 = ms.openCursor("s0", StartAt.oldest());
+        Assert.equals((int64) 4, (int64) c1.next((int64) 10).count());
+        // newest: sees only what arrives after
+        StreamCursor c2 = ms.openCursor("s0", StartAt.newest());
+        Assert.equals((int64) 0, (int64) c2.next((int64) 10).count());
+        int8[] e5 = StreamTest.pay("e5");
+        String q5 = ms.publish(e5, "");
+        Batch nb = c2.next((int64) 10);
+        Assert.equals((int64) 1, (int64) nb.count());
+        Assert.isTrue(StreamTest.text(nb.eventAt(0).payload)
+            .equals("e5"));
+        // stored position: covered in opaquePositionRoundtrip; here
+        // via the PUBLISH-returned token of e3 — a cursor there sees
+        // e3 onward.
+        StreamCursor c3 = ms.openCursor("s0", StartAt.position(q3));
+        Batch pb = c3.next((int64) 10);
+        Assert.equals((int64) 3, (int64) pb.count());
+        Assert.isTrue(StreamTest.text(pb.eventAt(0).payload)
+            .equals("e3"));
+        // timestamp: from e4's timestamp onward (e4, e5).
+        StreamCursor c4 = ms.openCursor("s0",
+            StartAt.timestamp(pb.eventAt(1).timestamp));
+        Assert.equals((int64) 2, (int64) c4.next((int64) 10).count());
+    }
+
+    // 7.1.6 — a batch record carries payload, key, timestamp,
+    // sub-stream identity, and position.
+    @Test
+    public void batchCarriesTheFullRecord() {
+        MemoryStream ms = heap MemoryStream(1);
+        int8[] p = StreamTest.pay("payload!");
+        String q = ms.publish(p, "the-key");
+        StreamCursor c = ms.openCursor("s0", StartAt.oldest());
+        Batch b = c.next((int64) 1);
+        Assert.equals((int64) 1, (int64) b.count());
+        Event e = b.eventAt(0);
+        Assert.isTrue(StreamTest.text(e.payload).equals("payload!"));
+        Assert.isTrue(e.key.equals("the-key"));
+        Assert.isTrue(e.timestamp > 0);
+        Assert.isTrue(e.subStream.equals("s0"));
+        Assert.isTrue(e.position.equals(q));
+        // Same key → same sub-stream, in order (2-sub stream).
+        MemoryStream ms2 = heap MemoryStream(2);
+        int8[] r1 = StreamTest.pay("r1");
+        int8[] r2 = StreamTest.pay("r2");
+        int8[] r3 = StreamTest.pay("r3");
+        String w1 = ms2.publish(r1, "same");
+        String w2 = ms2.publish(r2, "same");
+        String w3 = ms2.publish(r3, "same");
+        String[] ids = ms2.subStreamIds();
+        int64 total = 0;
+        int64 maxOnOne = 0;
+        int32 i = 0;
+        while (i < (int32) ids.count()) {
+            StreamCursor sc = ms2.openCursor(ids[i], StartAt.oldest());
+            int64 n = (int64) sc.next((int64) 10).count();
+            total = total + n;
+            if (n > maxOnOne) { maxOnOne = n; }
+            i = i + 1;
+        }
+        Assert.equals((int64) 3, total);
+        Assert.equals((int64) 3, maxOnOne);   // all on ONE sub-stream
+    }
+
+    // 7.1.8 — a rate limit is a TRANSIENT failure with retry guidance,
+    // and the very next read succeeds.
+    @Test
+    public void rateLimitSurfacesTransient() {
+        MemoryStream ms = heap MemoryStream(1);
+        int8[] p = StreamTest.pay("x");
+        String q = ms.publish(p, "");
+        ms.induceRateLimit(1);
+        StreamCursor c = ms.openCursor("s0", StartAt.oldest());
+        boolean threw = false;
+        try {
+            Batch never = c.next((int64) 1);
+        } catch (CloudException e) {
+            threw = true;
+            Assert.isTrue(e.isTransient());
+            Assert.isTrue(e.message.contains("retry"));
+        }
+        Assert.isTrue(threw);
+        Assert.equals((int64) 1, (int64) c.next((int64) 1).count());
+    }
+
+    // 7.1.10 — Kafka-only capabilities are DECLARED, not assumed: the
+    // memory driver answers no, and require() fails naming them.
+    @Test
+    public void kafkaOnlyCapabilitiesAreDeclaredNotAssumed() {
+        MemoryStream ms = heap MemoryStream(1);
+        Assert.isTrue(ms.capabilities().supports(Caps.RESHARDING()));
+        Assert.isTrue(ms.capabilities()
+            .supports(Caps.START_AT_TIMESTAMP()));
+        Assert.isFalse(ms.capabilities()
+            .supports(Caps.LOG_COMPACTION()));
+        Assert.isFalse(ms.capabilities()
+            .supports(Caps.TRANSACTIONAL_PRODUCE()));
+        Assert.isFalse(ms.capabilities()
+            .supports(Caps.CONSUMER_GROUPS()));
+        boolean threw = false;
+        try {
+            ms.capabilities().require(Caps.LOG_COMPACTION(),
+                "produce", "-");
+        } catch (CloudException e) {
+            threw = true;
+            Assert.isTrue(e.message.contains("stream.log-compaction"));
+            Assert.isTrue(e.message.contains("memory-stream"));
+        }
+        Assert.isTrue(threw);
+    }
+}

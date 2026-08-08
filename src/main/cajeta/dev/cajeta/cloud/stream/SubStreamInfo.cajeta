@@ -1,0 +1,32 @@
+package dev.cajeta.cloud.stream;
+
+import cajeta.lang.String;
+
+/**
+ * One sub-stream's state (spec §12.3): identity, whether it is still
+ * open, and — once closed — its SUCCESSORS, so consumption continues
+ * across a reshard (Kinesis shards split and merge; a consumer drains
+ * the closed shard, then follows its children).
+ */
+public final class SubStreamInfo {
+
+    public String id;
+    public boolean open;
+    String[] successorArr;
+
+    SubStreamInfo(#String id, boolean open, #String[] successors) {
+        this.id #= id;
+        this.open = open;
+        this.successorArr #= successors;
+        return;
+    }
+
+    public int32 successorCount() {
+        return (int32) this.successorArr.count();
+    }
+
+    public #String successorAt(int32 i) {
+        String out = "" + this.successorArr[i];
+        return #out;
+    }
+}

@@ -1,0 +1,20 @@
+package dev.cajeta.cloud.stream;
+
+/**
+ * A consumption handle on ONE sub-stream (spec §12.5, §12.6.1).
+ * Cursor lifecycle is INVISIBLE: Kinesis shard iterators expire after
+ * five minutes and roll forward on every read; Kafka has no cursors at
+ * all. The consumer sees only batches and their position tokens — the
+ * adapter renews whatever it needs underneath.
+ */
+public interface StreamCursor {
+
+    /**
+     * Up to `maxEvents` next records. An empty, non-closed batch means
+     * "nothing yet" (poll again); `closed` true means the sub-stream
+     * is closed AND fully drained — fetch successors (§12.3.3).
+     */
+    #Batch next(int64 maxEvents);
+
+    void close();
+}

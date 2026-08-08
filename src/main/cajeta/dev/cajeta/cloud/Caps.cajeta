@@ -21,4 +21,9 @@ public final class Caps {
     // Stream.
     public static #String RESHARDING()         { String s = "stream.resharding";                return #s; }
     public static #String START_AT_TIMESTAMP() { String s = "stream.start-at-timestamp";        return #s; }
+
+    // Kafka-only (§12.7) — declared, never assumed.
+    public static #String LOG_COMPACTION()        { String s = "stream.log-compaction";        return #s; }
+    public static #String TRANSACTIONAL_PRODUCE() { String s = "stream.transactional-produce"; return #s; }
+    public static #String CONSUMER_GROUPS()       { String s = "stream.consumer-groups";       return #s; }
 }

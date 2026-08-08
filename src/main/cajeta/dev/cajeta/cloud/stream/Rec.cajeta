@@ -1,0 +1,21 @@
+package dev.cajeta.cloud.stream;
+
+import cajeta.lang.String;
+
+/** Package-private stored record for the memory stream driver. */
+final class Rec {
+
+    int8[] payload;
+    String key;
+    int64 timestamp;
+    String position;
+
+    Rec(#int8[] payload, #String key, int64 timestamp,
+        #String position) {
+        this.payload #= payload;
+        this.key #= key;
+        this.timestamp = timestamp;
+        this.position #= position;
+        return;
+    }
+}

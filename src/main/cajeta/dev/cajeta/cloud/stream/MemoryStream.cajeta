@@ -1,0 +1,201 @@
+package dev.cajeta.cloud.stream;
+
+import cajeta.concurrent.LockGuard;
+import cajeta.lang.String;
+import dev.cajeta.cloud.Capabilities;
+import dev.cajeta.cloud.Caps;
+import dev.cajeta.cloud.CloudException;
+import dev.cajeta.cloud.CloudStats;
+
+/**
+ * The in-memory stream driver (spec §12): N ordered sub-streams, keyed
+ * routing, opaque position tokens, and — the part Kafka can never
+ * exercise — a {@link #split} reshard hook that closes a sub-stream
+ * and registers successors, so §12.3's dynamic-set contract is
+ * testable without a Kinesis account. Timestamps are logical (the
+ * shared monotonic sequence). Declares resharding and
+ * start-at-timestamp; does NOT declare the Kafka-only trio (§12.7) —
+ * consumers must ask, not assume.
+ */
+public final class MemoryStream implements EventStream {
+
+    StreamState st;
+    Capabilities caps;
+
+    public MemoryStream(int32 initialSubStreams) {
+        if (initialSubStreams < 1) {
+            throw heap CloudException(CloudException.PROVIDER_ERROR(),
+                "memory-stream", "MemoryStream", "-",
+                "need at least one sub-stream");
+        }
+        this.st = heap StreamState();
+        int32 i = 0;
+        while (i < initialSubStreams) {
+            String id = "s" + (int64) i;
+            this.st.subs.add(heap Sub(#id));
+            i = i + 1;
+        }
+        Capabilities c = heap Capabilities("memory-stream");
+        c.declare(Caps.RESHARDING(),
+            "split() closes a sub-stream and registers two successors");
+        c.declare(Caps.START_AT_TIMESTAMP(), "logical clock");
+        this.caps #= c;
+        return;
+    }
+
+    public Capabilities capabilities() { return this.caps; }
+
+    public CloudStats stats() { return this.st.statsObj; }
+
+    public #String[] subStreamIds() {
+        LockGuard g = this.st.lock.acquire();
+        int32 open = 0;
+        int32 i = 0;
+        while (i < this.st.subs.count()) {
+            if (this.st.subs.get(i).open) { open = open + 1; }
+            i = i + 1;
+        }
+        String[] out = heap String[(int64) open];
+        int32 at = 0;
+        i = 0;
+        while (i < this.st.subs.count()) {
+            if (this.st.subs.get(i).open) {
+                out[at] = "" + this.st.subs.get(i).id;
+                at = at + 1;
+            }
+            i = i + 1;
+        }
+        return #out;
+    }
+
+    public #SubStreamInfo describe(String subStream) {
+        LockGuard g = this.st.lock.acquire();
+        Sub sub = this.st.subOrThrow(subStream, "describe");
+        int32 ns = sub.successors.count();
+        String[] succ = heap String[(int64) ns];
+        int32 i = 0;
+        while (i < ns) {
+            succ[i] = "" + sub.successors.get(i);
+            i = i + 1;
+        }
+        String id = "" + sub.id;
+        SubStreamInfo info = heap SubStreamInfo(#id, sub.open, #succ);
+        return #info;
+    }
+
+    public #String publish(int8[] payload, String key) {
+        LockGuard g = this.st.lock.acquire();
+        // Route among OPEN sub-streams: stable by key hash, else
+        // round-robin off the sequence.
+        int32 open = 0;
+        int32 i = 0;
+        while (i < this.st.subs.count()) {
+            if (this.st.subs.get(i).open) { open = open + 1; }
+            i = i + 1;
+        }
+        if (open == 0) {
+            throw heap CloudException(CloudException.PROVIDER_ERROR(),
+                "memory-stream", "publish", key,
+                "every sub-stream is closed");
+        }
+        int64 pick = 0;
+        if (key.count() > 0) {
+            int64 h = key.hash();
+            if (h < 0) { h = -h; }
+            pick = h % (int64) open;
+        } else {
+            pick = this.st.seq.load() % (int64) open;
+        }
+        Sub target = null;
+        int32 seen = 0;
+        i = 0;
+        while (i < this.st.subs.count()) {
+            if (this.st.subs.get(i).open) {
+                if ((int64) seen == pick) {
+                    target = this.st.subs.get(i);
+                    i = this.st.subs.count();
+                } else {
+                    seen = seen + 1;
+                    i = i + 1;
+                }
+            } else {
+                i = i + 1;
+            }
+        }
+        int64 ts = this.st.seq.fetchAdd((int64) 1) + 1;
+        int64 idx = (int64) target.events.count();
+        String pos = StreamState.token(target.id, idx);
+        int64 n = (int64) payload.count();
+        int8[] copy = heap int8[n];
+        int64 b = 0;
+        while (b < n) { copy[b] = payload[b]; b = b + 1; }
+        String k = "" + key;
+        String posStore = "" + pos;
+        target.events.add(heap Rec(#copy, #k, ts, #posStore));
+        this.st.statsObj.recordCall((int64) 0, n, (int64) 0, false);
+        return #pos;
+    }
+
+    public #StreamCursor openCursor(String subStream, StartAt start) {
+        LockGuard g = this.st.lock.acquire();
+        Sub sub = this.st.subOrThrow(subStream, "openCursor");
+        int64 at = 0;
+        if (start.kind == StartAt.OLDEST()) {
+            at = 0;
+        } else {
+            if (start.kind == StartAt.NEWEST()) {
+                at = (int64) sub.events.count();
+            } else {
+                if (start.kind == StartAt.POSITION()) {
+                    at = StreamState.parseToken(start.token, subStream);
+                } else {
+                    this.caps.require(Caps.START_AT_TIMESTAMP(),
+                        "openCursor", subStream);
+                    at = (int64) sub.events.count();
+                    int32 i = 0;
+                    while (i < sub.events.count()) {
+                        if (sub.events.get(i).timestamp
+                            >= start.timeMillis) {
+                            at = (int64) i;
+                            i = sub.events.count();
+                        } else {
+                            i = i + 1;
+                        }
+                    }
+                }
+            }
+        }
+        MemoryCursor cur = heap MemoryCursor(this.st, subStream, at);
+        return #cur;
+    }
+
+    /**
+     * The reshard hook (§12.3.2, plan 7.2.2): close `subStream` and
+     * register two successors `<id>.0` / `<id>.1`. Existing records
+     * stay drainable; new keyed publishes route only to open subs.
+     */
+    public void split(String subStream) {
+        LockGuard g = this.st.lock.acquire();
+        Sub sub = this.st.subOrThrow(subStream, "split");
+        if (!sub.open) {
+            throw heap CloudException(CloudException.PRECONDITION_FAILED(),
+                "memory-stream", "split", subStream,
+                "sub-stream already closed");
+        }
+        sub.open = false;
+        String a = sub.id + ".0";
+        String b = sub.id + ".1";
+        sub.successors.add("" + a);
+        sub.successors.add("" + b);
+        this.st.subs.add(heap Sub(#a));
+        this.st.subs.add(heap Sub(#b));
+        return;
+    }
+
+    /** Test hook (§12.5.4): the next `count` reads rate-limit. */
+    public void induceRateLimit(int32 count) {
+        LockGuard g = this.st.lock.acquire();
+        this.st.throttleOnce = count;
+        return;
+    }
+}

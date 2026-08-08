@@ -1,0 +1,37 @@
+package dev.cajeta.cloud.stream;
+
+import cajeta.lang.String;
+import dev.cajeta.cloud.Capabilities;
+import dev.cajeta.cloud.CloudStats;
+
+/**
+ * The stream port (spec §12): partitioned, ordered, resumable
+ * consumption — what Kafka, Kinesis, Pub/Sub, and Event Hubs genuinely
+ * share, and nothing they don't. Positions are opaque String tokens
+ * (§12.2), the sub-stream set is dynamic (§12.3), and the port NEVER
+ * stores a consumer's position (§12.5.2). Kafka-only powers — log
+ * compaction, transactional produce, broker-managed consumer groups —
+ * are capabilities (§12.7), never assumptions.
+ */
+public interface EventStream {
+
+    Capabilities capabilities();
+
+    CloudStats stats();
+
+    /** The CURRENTLY OPEN sub-streams (§12.3.1) — never a fixed count. */
+    #String[] subStreamIds();
+
+    /** State of one sub-stream, open or closed, with successors (§12.3.2). */
+    #SubStreamInfo describe(String subStream);
+
+    /**
+     * Publish with an optional partition key ("" for none); records
+     * with the same key land on the same sub-stream. Returns the
+     * record's position token (§12.5.3).
+     */
+    #String publish(int8[] payload, String key);
+
+    /** Open a cursor on one sub-stream at the given start (§12.4.1). */
+    #StreamCursor openCursor(String subStream, StartAt start);
+}

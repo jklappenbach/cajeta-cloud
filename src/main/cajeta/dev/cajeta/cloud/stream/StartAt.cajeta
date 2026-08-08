@@ -1,0 +1,54 @@
+package dev.cajeta.cloud.stream;
+
+import cajeta.lang.String;
+
+/**
+ * Where consumption starts (spec §12.4.1): oldest, newest, a stored
+ * position token, or a timestamp. Maps one-for-one onto Kinesis
+ * TRIM_HORIZON / LATEST / AT_SEQUENCE_NUMBER / AT_TIMESTAMP and Kafka
+ * earliest / latest / seek / offsetsForTimes.
+ */
+public final class StartAt {
+
+    public static int32 OLDEST()    { return 0; }
+    public static int32 NEWEST()    { return 1; }
+    public static int32 POSITION()  { return 2; }
+    public static int32 TIMESTAMP() { return 3; }
+
+    public int32 kind;
+    public String token;       // POSITION only; "" otherwise
+    public int64 timeMillis;   // TIMESTAMP only; 0 otherwise
+
+    StartAt(int32 kind, #String token, int64 timeMillis) {
+        this.kind = kind;
+        this.token #= token;
+        this.timeMillis = timeMillis;
+        return;
+    }
+
+    public static #StartAt oldest() {
+        String t = "";
+        StartAt s = heap StartAt(StartAt.OLDEST(), #t, (int64) 0);
+        return #s;
+    }
+
+    public static #StartAt newest() {
+        String t = "";
+        StartAt s = heap StartAt(StartAt.NEWEST(), #t, (int64) 0);
+        return #s;
+    }
+
+    /** Resume from a STORED opaque token (§12.2.1, §12.5.2). */
+    public static #StartAt position(String token) {
+        String t = "" + token;
+        StartAt s = heap StartAt(StartAt.POSITION(), #t, (int64) 0);
+        return #s;
+    }
+
+    /** Start at a timestamp — capability-gated (§12.4.1, Caps). */
+    public static #StartAt timestamp(int64 timeMillis) {
+        String t = "";
+        StartAt s = heap StartAt(StartAt.TIMESTAMP(), #t, timeMillis);
+        return #s;
+    }
+}

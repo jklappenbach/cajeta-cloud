@@ -1,0 +1,28 @@
+package dev.cajeta.cloud.stream;
+
+import cajeta.lang.String;
+
+/**
+ * One consumed record (spec §12.5.1): payload, key where the provider
+ * has one ("" otherwise), timestamp, the sub-stream it came from, and
+ * its POSITION — an opaque token (§12.2.1; Kinesis sequence numbers
+ * are up-to-129-digit strings, so this is never an integer).
+ */
+public final class Event {
+
+    public int8[] payload;
+    public String key;
+    public int64 timestamp;
+    public String subStream;
+    public String position;
+
+    Event(#int8[] payload, #String key, int64 timestamp,
+          #String subStream, #String position) {
+        this.payload #= payload;
+        this.key #= key;
+        this.timestamp = timestamp;
+        this.subStream #= subStream;
+        this.position #= position;
+        return;
+    }
+}

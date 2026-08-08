@@ -1,0 +1,72 @@
+package dev.cajeta.cloud.stream;
+
+import cajeta.collection.ArrayList;
+import cajeta.concurrent.LockGuard;
+import cajeta.lang.String;
+import dev.cajeta.cloud.CloudException;
+
+/**
+ * The memory driver's cursor: reads one sub-stream forward from an
+ * index. `closed` turns true only when the sub-stream is closed AND
+ * every record has been delivered (§12.3.3) — so a reshard never
+ * skips a record. Holds StreamState, not MemoryStream (see
+ * StreamState's header).
+ */
+final class MemoryCursor implements StreamCursor {
+
+    StreamState st;
+    String subId;
+    int64 idx;
+
+    MemoryCursor(StreamState st, String subId, int64 idx) {
+        this.st = st;
+        this.subId = "" + subId;
+        this.idx = idx;
+        return;
+    }
+
+    public #Batch next(int64 maxEvents) {
+        if (maxEvents < 1) {
+            throw heap CloudException(CloudException.PROVIDER_ERROR(),
+                "memory-stream", "next", this.subId,
+                "maxEvents must be >= 1");
+        }
+        LockGuard g = this.st.lock.acquire();
+        if (this.st.throttleOnce > 0) {
+            // §12.5.4: a rate limit is TRANSIENT, with retry guidance.
+            this.st.throttleOnce = this.st.throttleOnce - 1;
+            this.st.statsObj.recordCall((int64) 0, (int64) 0, (int64) 0,
+                                        true);
+            throw heap CloudException(CloudException.TRANSIENT(),
+                "memory-stream", "next", this.subId,
+                "throughput exceeded; retry with backoff");
+        }
+        Sub sub = this.st.subOrThrow(this.subId, "next");
+        ArrayList<Event> out = heap ArrayList<Event>();
+        int64 total = (int64) sub.events.count();
+        int64 bytesOut = 0;
+        int64 taken = 0;
+        while (this.idx < total && taken < maxEvents) {
+            Rec r = sub.events.get((int32) this.idx);
+            int64 n = (int64) r.payload.count();
+            int8[] pay = heap int8[n];
+            int64 b = 0;
+            while (b < n) { pay[b] = r.payload[b]; b = b + 1; }
+            String k = "" + r.key;
+            String sid = "" + this.subId;
+            String pos = "" + r.position;
+            out.add(heap Event(#pay, #k, r.timestamp, #sid, #pos));
+            bytesOut = bytesOut + n;
+            this.idx = this.idx + 1;
+            taken = taken + 1;
+        }
+        boolean drained = !sub.open && this.idx >= total;
+        String nextTok = StreamState.token(this.subId, this.idx);
+        this.st.statsObj.recordCall((int64) 0, (int64) 0, bytesOut,
+                                    false);
+        Batch batch = heap Batch(#out, #nextTok, drained);
+        return #batch;
+    }
+
+    public void close() { return; }
+}
