@@ -1,0 +1,96 @@
+package dev.cajeta.cloud.selftest;
+
+import cajeta.lang.String;
+import dev.cajeta.cloud.Capabilities;
+import dev.cajeta.cloud.Caps;
+import dev.cajeta.cloud.CloudStats;
+import dev.cajeta.cloud.object.CondResult;
+import dev.cajeta.cloud.object.ListPage;
+import dev.cajeta.cloud.object.MemoryObjectStore;
+import dev.cajeta.cloud.object.MultipartUpload;
+import dev.cajeta.cloud.object.ObjectReader;
+import dev.cajeta.cloud.object.ObjectStore;
+import dev.cajeta.cloud.object.ObjectWriter;
+import dev.cajeta.cloud.object.StatResult;
+
+/**
+ * A bare-bones adapter for testkit testing: core ops delegate to a
+ * memory store, but it declares ONLY ordered listing + read-after-
+ * write — every optional capability is undeclared and fails per §3.2.
+ * The testkit must take its undeclared branches against this store.
+ */
+final class MinimalStore implements ObjectStore {
+
+    MemoryObjectStore inner;
+    Capabilities caps;
+
+    MinimalStore() {
+        this.inner = heap MemoryObjectStore();
+        Capabilities c = heap Capabilities("minimal");
+        c.declare(Caps.LIST_ORDERED(), "");
+        c.declare(Caps.READ_AFTER_WRITE(), "");
+        this.caps #= c;
+        return;
+    }
+
+    public Capabilities capabilities() { return this.caps; }
+
+    public CloudStats stats() { return this.inner.stats(); }
+
+    public #String put(String key, int8[] bytes, String contentType) {
+        return this.inner.put(key, bytes, contentType);
+    }
+
+    public #int8[] get(String key) {
+        return this.inner.get(key);
+    }
+
+    public #StatResult stat(String key) {
+        return this.inner.stat(key);
+    }
+
+    public #int8[] getRange(String key, int64 offset, int64 length) {
+        this.caps.require(Caps.RANGE_READ(), "getRange", key);
+        return this.inner.getRange(key, offset, length);
+    }
+
+    public boolean delete(String key) {
+        return this.inner.delete(key);
+    }
+
+    public #String copy(String srcKey, String dstKey) {
+        this.caps.require(Caps.SERVER_SIDE_COPY(), "copy", srcKey);
+        return this.inner.copy(srcKey, dstKey);
+    }
+
+    public #ListPage list(String prefix, String delimiter, String token,
+                          int64 maxKeys) {
+        return this.inner.list(prefix, delimiter, token, maxKeys);
+    }
+
+    public #ObjectReader openRead(String key) {
+        return this.inner.openRead(key);
+    }
+
+    public #ObjectWriter openWrite(String key, String contentType) {
+        return this.inner.openWrite(key, contentType);
+    }
+
+    public #MultipartUpload beginMultipart(String key,
+                                           String contentType) {
+        this.caps.require(Caps.MULTIPART(), "beginMultipart", key);
+        return this.inner.beginMultipart(key, contentType);
+    }
+
+    public #CondResult putIfAbsent(String key, int8[] bytes,
+                                   String contentType) {
+        this.caps.require(Caps.COND_PUT_CREATE(), "putIfAbsent", key);
+        return this.inner.putIfAbsent(key, bytes, contentType);
+    }
+
+    public #CondResult putIfMatch(String key, int8[] bytes,
+                                  String contentType, String etag) {
+        this.caps.require(Caps.COND_PUT_OVERWRITE(), "putIfMatch", key);
+        return this.inner.putIfMatch(key, bytes, contentType, etag);
+    }
+}

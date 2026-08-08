@@ -1,0 +1,90 @@
+package dev.cajeta.cloud.selftest;
+
+import cajeta.lang.String;
+import dev.cajeta.cloud.Capabilities;
+import dev.cajeta.cloud.CloudStats;
+import dev.cajeta.cloud.object.CondResult;
+import dev.cajeta.cloud.object.ListPage;
+import dev.cajeta.cloud.object.MemoryObjectStore;
+import dev.cajeta.cloud.object.MultipartUpload;
+import dev.cajeta.cloud.object.ObjectReader;
+import dev.cajeta.cloud.object.ObjectStore;
+import dev.cajeta.cloud.object.ObjectWriter;
+import dev.cajeta.cloud.object.StatResult;
+
+/**
+ * A DELIBERATELY BROKEN adapter: putIfAbsent always claims victory
+ * (§14.4's nightmare — it makes every concurrency test lie). The
+ * conformance testkit MUST fail this store; if it passes, the testkit
+ * is vacuous.
+ */
+final class AlwaysWinStore implements ObjectStore {
+
+    MemoryObjectStore inner;
+
+    AlwaysWinStore() {
+        this.inner = heap MemoryObjectStore();
+        return;
+    }
+
+    public Capabilities capabilities() {
+        return this.inner.capabilities();
+    }
+
+    public CloudStats stats() { return this.inner.stats(); }
+
+    public #String put(String key, int8[] bytes, String contentType) {
+        return this.inner.put(key, bytes, contentType);
+    }
+
+    public #int8[] get(String key) {
+        return this.inner.get(key);
+    }
+
+    public #StatResult stat(String key) {
+        return this.inner.stat(key);
+    }
+
+    public #int8[] getRange(String key, int64 offset, int64 length) {
+        return this.inner.getRange(key, offset, length);
+    }
+
+    public boolean delete(String key) {
+        return this.inner.delete(key);
+    }
+
+    public #String copy(String srcKey, String dstKey) {
+        return this.inner.copy(srcKey, dstKey);
+    }
+
+    public #ListPage list(String prefix, String delimiter, String token,
+                          int64 maxKeys) {
+        return this.inner.list(prefix, delimiter, token, maxKeys);
+    }
+
+    public #ObjectReader openRead(String key) {
+        return this.inner.openRead(key);
+    }
+
+    public #ObjectWriter openWrite(String key, String contentType) {
+        return this.inner.openWrite(key, contentType);
+    }
+
+    public #MultipartUpload beginMultipart(String key,
+                                           String contentType) {
+        return this.inner.beginMultipart(key, contentType);
+    }
+
+    /** The lie: everyone wins. */
+    public #CondResult putIfAbsent(String key, int8[] bytes,
+                                   String contentType) {
+        String etag = this.inner.put(key, bytes, contentType);
+        CondResult r = heap CondResult(true, #etag);
+        return #r;
+    }
+
+    public #CondResult putIfMatch(String key, int8[] bytes,
+                                  String contentType, String etag) {
+        return this.inner.putIfMatch(key, bytes, contentType, etag);
+    }
+}

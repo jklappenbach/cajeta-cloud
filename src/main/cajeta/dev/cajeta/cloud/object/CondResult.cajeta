@@ -14,7 +14,7 @@ public final class CondResult {
     public boolean won;
     public String etag;
 
-    CondResult(boolean won, #String etag) {
+    public CondResult(boolean won, #String etag) {
         this.won = won;
         this.etag #= etag;
         return;

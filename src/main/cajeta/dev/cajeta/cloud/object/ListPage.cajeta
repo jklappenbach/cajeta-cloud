@@ -21,7 +21,7 @@ public final class ListPage {
     String token;
     public boolean ordered;
 
-    ListPage(#String[] keys, #int64[] sizes, #int64[] mods,
+    public ListPage(#String[] keys, #int64[] sizes, #int64[] mods,
              #String[] etags, #String[] prefixes, #String token,
              boolean ordered) {
         this.keyArr #= keys;

@@ -1,0 +1,50 @@
+package dev.cajeta.cloud.selftest;
+
+import dev.cajeta.unit.Assert;
+import dev.cajeta.cloud.CloudException;
+import dev.cajeta.cloud.object.MemoryObjectStore;
+import dev.cajeta.cloud.testkit.ObjectStoreContract;
+
+/**
+ * cajeta-cloud U4 — the conformance testkit itself: the full suite
+ * passes the memory driver (4.1.1, 4.1.4), selection is
+ * capability-conditional with undeclared capabilities asserted to fail
+ * cleanly (4.1.2, 4.1.5), and — the vacuity check — a deliberately
+ * always-winning adapter is CAUGHT (4.1.3; a testkit that passes it
+ * proves nothing).
+ */
+public class TestkitTest {
+
+    public TestkitTest() { return; }
+
+    // 4.1.1 + 4.1.4 — the whole-port suite passes the memory driver.
+    @Test
+    public void contractPassesTheMemoryDriver() {
+        MemoryObjectStore s = heap MemoryObjectStore();
+        ObjectStoreContract.verify(s, "tk/");
+    }
+
+    // 4.1.2 + 4.1.5 — against an adapter declaring almost nothing, the
+    // suite takes its undeclared branches (each op must fail cleanly
+    // per §3.2) and still passes.
+    @Test
+    public void undeclaredCapabilitiesFailCleanly() {
+        MinimalStore s = heap MinimalStore();
+        ObjectStoreContract.verify(s, "tk-min/");
+    }
+
+    // 4.1.3 — the vacuity check: an always-winning conditional put
+    // MUST fail the contract, at the cond-must-lose check.
+    @Test
+    public void alwaysWinningAdapterIsCaught() {
+        AlwaysWinStore s = heap AlwaysWinStore();
+        boolean threw = false;
+        try {
+            ObjectStoreContract.verify(s, "tk-liar/");
+        } catch (CloudException e) {
+            threw = true;
+            Assert.isTrue(e.message.contains("cond-must-lose"));
+        }
+        Assert.isTrue(threw);
+    }
+}

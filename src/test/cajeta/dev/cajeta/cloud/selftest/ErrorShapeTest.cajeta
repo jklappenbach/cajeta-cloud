@@ -1,0 +1,64 @@
+package dev.cajeta.cloud.selftest;
+
+import dev.cajeta.unit.Assert;
+import dev.cajeta.cloud.CloudException;
+import dev.cajeta.cloud.Credentials;
+import dev.cajeta.cloud.object.MemoryObjectStore;
+
+/**
+ * cajeta-cloud 5.1.3 + 5.1.4 — a failure names provider, operation,
+ * and key (never a bare status code), and credentials NEVER appear in
+ * a message, even on a deliberately-logged failure path.
+ */
+public class ErrorShapeTest {
+
+    public ErrorShapeTest() { return; }
+
+    // 5.1.3 — provider, operation, and key all appear in the message.
+    @Test
+    public void failureNamesProviderOperationAndKey() {
+        MemoryObjectStore s = heap MemoryObjectStore();
+        boolean threw = false;
+        try {
+            int8[] never = s.get("bucket/missing-object");
+        } catch (CloudException e) {
+            threw = true;
+            Assert.isTrue(e.message.contains("memory"));
+            Assert.isTrue(e.message.contains("get"));
+            Assert.isTrue(e.message.contains("bucket/missing-object"));
+        }
+        Assert.isTrue(threw);
+        // All five kinds are distinguishable — retry logic can branch.
+        Assert.isFalse(CloudException.NOT_FOUND()
+            == CloudException.ACCESS_DENIED());
+        Assert.isFalse(CloudException.PRECONDITION_FAILED()
+            == CloudException.TRANSIENT());
+        Assert.isFalse(CloudException.TRANSIENT()
+            == CloudException.PROVIDER_ERROR());
+    }
+
+    // 5.1.4 — the deliberately-logged failure path: an error message
+    // built from credentials carries the redacted rendering only.
+    @Test
+    public void credentialsNeverAppearInMessages() {
+        Credentials creds = heap Credentials("AKIAIOSFODNN7EXAMPLE",
+            "wJalrXUtnFEMI/K7MDENG/bPxRfiCY");
+        String rendered = creds.redacted();
+        Assert.isTrue(rendered.equals("AKIA…[redacted]"));
+        // The failure path an adapter would actually take.
+        CloudException e = heap CloudException(
+            CloudException.ACCESS_DENIED(), "s3", "put", "b/k",
+            "signature rejected for " + creds.redacted());
+        Assert.isFalse(e.message
+            .contains("wJalrXUtnFEMI/K7MDENG/bPxRfiCY"));
+        Assert.isFalse(e.message.contains("IOSFODNN7EXAMPLE"));
+        Assert.isTrue(e.message.contains("AKIA…[redacted]"));
+        // The signing accessors still serve the adapter.
+        Assert.isTrue(creds.secretKey()
+            .equals("wJalrXUtnFEMI/K7MDENG/bPxRfiCY"));
+        Assert.isTrue(creds.accessKeyId()
+            .equals("AKIAIOSFODNN7EXAMPLE"));
+        // toString is the redacted form too.
+        Assert.isTrue(creds.toString().equals("AKIA…[redacted]"));
+    }
+}

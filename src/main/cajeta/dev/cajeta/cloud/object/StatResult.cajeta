@@ -15,7 +15,7 @@ public final class StatResult {
     public int64 lastModified;
     public String etag;
 
-    StatResult(boolean exists, int64 size, #String contentType,
+    public StatResult(boolean exists, int64 size, #String contentType,
                int64 lastModified, #String etag) {
         this.exists = exists;
         this.size = size;

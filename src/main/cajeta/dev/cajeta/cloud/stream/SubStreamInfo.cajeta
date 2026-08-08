@@ -14,7 +14,7 @@ public final class SubStreamInfo {
     public boolean open;
     String[] successorArr;
 
-    SubStreamInfo(#String id, boolean open, #String[] successors) {
+    public SubStreamInfo(#String id, boolean open, #String[] successors) {
         this.id #= id;
         this.open = open;
         this.successorArr #= successors;

@@ -16,7 +16,7 @@ public final class Batch {
     String next;
     public boolean closed;
 
-    Batch(#ArrayList<Event> events, #String nextPosition,
+    public Batch(#ArrayList<Event> events, #String nextPosition,
           boolean closed) {
         this.eventList #= events;
         this.next #= nextPosition;
