@@ -62,6 +62,15 @@ fi
 [[ -f "$unit_cja" ]] || { echo "could not resolve a dev.cajeta.unit archive" >&2; exit 1; }
 echo ">> cajeta-unit: $unit_cja"
 
+# §14.11 + §14.13 (plan 1.1.1/1.1.2): the interface library declares NO
+# capabilities and NO runtime dependencies — a filesystem driver or a
+# provider SDK landing here is a spec violation, not a shortcut.
+grep -q '"capabilities": \[\]' "$here/cajeta.json" \
+    || { echo "SPEC VIOLATION (§14.11): capabilities must stay []" >&2; exit 1; }
+grep -q '"dependencies": {}' "$here/cajeta.json" \
+    || { echo "SPEC VIOLATION (§14.13): runtime dependencies must stay {}" >&2; exit 1; }
+echo ">> manifest: capabilities [] and dependencies {} verified"
+
 echo ">> building cloud library .cja"
 "$CAJETA" --emit=cja -o "$out/cloud.cja" \
     dev.cajeta.cloud.Cloud.run "$here/src/main/cajeta" "$out" >/dev/null

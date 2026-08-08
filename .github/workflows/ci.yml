@@ -7,7 +7,7 @@
 #
 # Bare-runner flow: install the pinned cajeta toolchain from the cajeta
 # repo's GitHub Release; ./run-tests.sh takes its Olla-fetch path for
-# dev.cajeta.unit and dev.cajeta.ml. The Olla publish self-arms when OLLA_*
+# dev.cajeta.unit. The Olla publish self-arms when OLLA_*
 # secrets exist on this repo; until then releases bridge via cajeta-logging's
 # publish-sibling workflow (authorized 2026-07-29).
 

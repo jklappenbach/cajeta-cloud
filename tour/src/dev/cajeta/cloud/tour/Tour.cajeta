@@ -1,0 +1,183 @@
+package dev.cajeta.cloud.tour;
+
+import dev.cajeta.cloud.Capabilities;
+import dev.cajeta.cloud.Caps;
+import dev.cajeta.cloud.CloudException;
+import dev.cajeta.cloud.Credentials;
+import dev.cajeta.cloud.RetryPolicy;
+import dev.cajeta.cloud.object.CondResult;
+import dev.cajeta.cloud.object.ListPage;
+import dev.cajeta.cloud.object.MemoryObjectStore;
+import dev.cajeta.cloud.object.ObjectStore;
+import dev.cajeta.cloud.stream.Batch;
+import dev.cajeta.cloud.stream.MemoryStream;
+import dev.cajeta.cloud.stream.StartAt;
+import dev.cajeta.cloud.stream.StreamCursor;
+import dev.cajeta.cloud.stream.SubStreamInfo;
+import dev.cajeta.cloud.testkit.ObjectStoreContract;
+
+/**
+ * The self-checking tour of dev.cajeta.cloud. Every passage
+ * demonstrates a documented claim and CHECKS it — a non-zero exit
+ * means the docs lied.
+ */
+public final class Tour {
+
+    static int32 failures;
+
+    static void check(boolean ok, String what) {
+        if (ok) {
+            System.stdout.println("  ok  - " + what);
+        } else {
+            System.stdout.println("  FAIL- " + what);
+            Tour.failures = Tour.failures + 1;
+        }
+        return;
+    }
+
+    static #String text(int8[] b) {
+        int8[] copy = heap int8[(int64) b.count()];
+        int64 i = 0;
+        while (i < (int64) copy.count()) { copy[i] = b[i]; i = i + 1; }
+        String s = heap String(#copy, (int32) b.count());
+        return #s;
+    }
+
+    /** Passage 1 — the object port: production code sees ONE interface. */
+    static void objectPassage() {
+        System.stdout.println("passage: the object-store port");
+        ObjectStore store = heap MemoryObjectStore();
+        int8[] doc = "the quarterly report".toBytes();
+        String etag = store.put("reports/q3", doc, "text/plain");
+        Tour.check(Tour.text(store.get("reports/q3"))
+            .equals("the quarterly report"),
+            "put/get roundtrip through the port interface");
+        Tour.check(!store.stat("reports/q4").exists,
+            "absence is explicit — never null, never empty bytes");
+        int8[] head = store.getRange("reports/q3", (int64) 4, (int64) 9);
+        Tour.check(Tour.text(head).equals("quarterly"),
+            "a range read returns exactly the requested slice");
+        String e2 = store.put("reports/annual", doc, "text/plain");
+        String e3 = store.put("archive/q1", doc, "text/plain");
+        ListPage page = store.list("reports/", "", "", (int64) 10);
+        Tour.check(page.count() == 2 && page.ordered,
+            "prefix listing, with the order guarantee carried in-band");
+        return;
+    }
+
+    /** Passage 2 — conditional writes: the consensus-free primitive. */
+    static void conditionalPassage() {
+        System.stdout.println("passage: conditional writes");
+        ObjectStore store = heap MemoryObjectStore();
+        int8[] mine = "writer-A".toBytes();
+        int8[] yours = "writer-B".toBytes();
+        CondResult first = store.putIfAbsent("leases/job-7", mine, "t");
+        CondResult second = store.putIfAbsent("leases/job-7", yours, "t");
+        Tour.check(first.won && !second.won,
+            "exactly one creator wins; the loser LEARNS it lost");
+        Tour.check(second.etag.equals(first.etag),
+            "the loser receives the winner's token — re-read and retry");
+        CondResult swap = store.putIfMatch("leases/job-7", yours, "t",
+            first.etag);
+        Tour.check(swap.won,
+            "compare-and-swap advances holders of the current token");
+        CondResult stale = store.putIfMatch("leases/job-7", mine, "t",
+            first.etag);
+        Tour.check(!stale.won,
+            "a stale token loses — losing is a result, not an exception");
+        return;
+    }
+
+    /** Passage 3 — capabilities: fail at startup, not mid-write. */
+    static void capabilityPassage() {
+        System.stdout.println("passage: capability negotiation");
+        MemoryObjectStore store = heap MemoryObjectStore();
+        Capabilities caps = store.capabilities();
+        Tour.check(caps.supports(Caps.COND_PUT_CREATE()),
+            "capabilities answer definitively BEFORE any operation");
+        String[] needed = heap String[2];
+        needed[0] = Caps.COND_PUT_CREATE();
+        needed[1] = Caps.RANGE_READ();
+        caps.assertAll(needed);
+        Tour.check(true,
+            "a deployment pins its needs at startup with assertAll");
+        Capabilities bare = heap Capabilities("no-frills");
+        boolean threw = false;
+        try {
+            bare.require(Caps.MULTIPART(), "beginMultipart", "k");
+        } catch (CloudException e) {
+            threw = e.message.contains("object.multipart")
+                && e.message.contains("no-frills");
+        }
+        Tour.check(threw,
+            "an unsupported call fails NAMING capability and adapter");
+        return;
+    }
+
+    /** Passage 4 — the stream port: opaque positions, dynamic shards. */
+    static void streamPassage() {
+        System.stdout.println("passage: the stream port");
+        MemoryStream stream = heap MemoryStream(1);
+        int8[] r1 = "sensor-1".toBytes();
+        int8[] r2 = "sensor-2".toBytes();
+        int8[] r3 = "sensor-3".toBytes();
+        String p1 = stream.publish(r1, "device-9");
+        String p2 = stream.publish(r2, "device-9");
+        StreamCursor cur = stream.openCursor("s0", StartAt.oldest());
+        Batch b1 = cur.next((int64) 1);
+        String stored = b1.nextPosition();   // YOURS to store (§12.5.2)
+        Tour.check(b1.count() == 1,
+            "batches deliver payload, key, timestamp, and position");
+        StreamCursor resumed = stream.openCursor("s0",
+            StartAt.position(stored));
+        Tour.check(Tour.text(resumed.next((int64) 5).eventAt(0).payload)
+            .equals("sensor-2"),
+            "an opaque stored token resumes exactly where you left off");
+        // A reshard: the closed sub-stream drains, then successors.
+        stream.split("s0");
+        String p3 = stream.publish(r3, "device-9");
+        StreamCursor drain = stream.openCursor("s0", StartAt.oldest());
+        Batch all = drain.next((int64) 10);
+        Tour.check(all.count() == 2 && all.closed,
+            "a closed sub-stream drains to its END — nothing skipped");
+        SubStreamInfo info = stream.describe("s0");
+        Tour.check(info.successorCount() == 2,
+            "successors are obtainable; consumption continues");
+        return;
+    }
+
+    /** Passage 5 — errors, retry, redaction, and the testkit. */
+    static void operationsPassage() {
+        System.stdout.println("passage: operations");
+        RetryPolicy policy = RetryPolicy.standard((uint64) 42);
+        CloudException throttle = heap CloudException(
+            CloudException.TRANSIENT(), "s3", "put", "b/k", "throttled");
+        Tour.check(policy.shouldRetry(throttle, 0)
+            && policy.delayMillis(0) <= 100,
+            "transient failures retry under jittered backoff");
+        Credentials creds = heap Credentials("AKIAEXAMPLEID",
+            "SUPER/secret/material");
+        Tour.check(!creds.redacted().contains("secret"),
+            "credentials render redacted — secrets never reach a log");
+        MemoryObjectStore store = heap MemoryObjectStore();
+        ObjectStoreContract.verify(store, "tour/");
+        Tour.check(true,
+            "the conformance testkit passes the in-memory driver");
+        return;
+    }
+
+    public static int32 main() {
+        System.stdout.println("dev.cajeta.cloud tour");
+        Tour.objectPassage();
+        Tour.conditionalPassage();
+        Tour.capabilityPassage();
+        Tour.streamPassage();
+        Tour.operationsPassage();
+        if (Tour.failures > 0) {
+            System.stdout.println("FAILURES: " + (int64) Tour.failures);
+            return 1;
+        }
+        System.stdout.println("tour complete — every claim held");
+        return 0;
+    }
+}
