@@ -1,0 +1,67 @@
+package dev.cajeta.cloud;
+
+import cajeta.concurrent.AtomicInt64;
+
+/**
+ * Operability counters (spec §11.4): request count, failures, retries,
+ * bytes in/out, and cumulative + max latency — atomic, so fibers
+ * update them without a lock. Drivers and adapters record; consumers
+ * read.
+ */
+public final class CloudStats {
+
+    AtomicInt64 requestsA;
+    AtomicInt64 failuresA;
+    AtomicInt64 retriesA;
+    AtomicInt64 bytesInA;
+    AtomicInt64 bytesOutA;
+    AtomicInt64 latencyTotalA;
+    AtomicInt64 latencyMaxA;
+
+    public CloudStats() {
+        this.requestsA = heap AtomicInt64((int64) 0);
+        this.failuresA = heap AtomicInt64((int64) 0);
+        this.retriesA = heap AtomicInt64((int64) 0);
+        this.bytesInA = heap AtomicInt64((int64) 0);
+        this.bytesOutA = heap AtomicInt64((int64) 0);
+        this.latencyTotalA = heap AtomicInt64((int64) 0);
+        this.latencyMaxA = heap AtomicInt64((int64) 0);
+        return;
+    }
+
+    /** Record one operation. */
+    public void recordCall(int64 latencyMillis, int64 bytesIn,
+                       int64 bytesOut, boolean failed) {
+        int64 prior = this.requestsA.fetchAdd((int64) 1);
+        if (failed) {
+            int64 pf = this.failuresA.fetchAdd((int64) 1);
+        }
+        int64 pi = this.bytesInA.fetchAdd(bytesIn);
+        int64 po = this.bytesOutA.fetchAdd(bytesOut);
+        int64 pl = this.latencyTotalA.fetchAdd(latencyMillis);
+        // CAS-raise the max.
+        boolean done = false;
+        while (!done) {
+            int64 cur = this.latencyMaxA.load();
+            if (latencyMillis <= cur) { done = true; }
+            else if (this.latencyMaxA.compareAndSet(cur, latencyMillis)) {
+                done = true;
+            }
+        }
+        return;
+    }
+
+    /** Record a retry. */
+    public void recordRetry() {
+        int64 p = this.retriesA.fetchAdd((int64) 1);
+        return;
+    }
+
+    public int64 requests()     { return this.requestsA.load(); }
+    public int64 failures()     { return this.failuresA.load(); }
+    public int64 retries()      { return this.retriesA.load(); }
+    public int64 bytesIn()      { return this.bytesInA.load(); }
+    public int64 bytesOut()     { return this.bytesOutA.load(); }
+    public int64 latencyTotal() { return this.latencyTotalA.load(); }
+    public int64 latencyMax()   { return this.latencyMaxA.load(); }
+}

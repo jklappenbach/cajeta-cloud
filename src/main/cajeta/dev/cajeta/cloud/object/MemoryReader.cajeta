@@ -1,0 +1,36 @@
+package dev.cajeta.cloud.object;
+
+/**
+ * The memory driver's reader: a SNAPSHOT taken at open, so a
+ * concurrent replace never tears the read (spec §4.1, §4.4).
+ */
+final class MemoryReader implements ObjectReader {
+
+    int8[] snap;
+    int64 pos;
+
+    MemoryReader(#int8[] snap) {
+        this.snap #= snap;
+        this.pos = 0;
+        return;
+    }
+
+    public int64 read(int8[] buf, int64 max) {
+        int64 n = (int64) this.snap.count();
+        if (this.pos >= n) { return -1; }
+        int64 take = max;
+        if ((int64) buf.count() < take) { take = (int64) buf.count(); }
+        if (n - this.pos < take) { take = n - this.pos; }
+        int64 i = 0;
+        while (i < take) {
+            buf[i] = this.snap[this.pos + i];
+            i = i + 1;
+        }
+        this.pos = this.pos + take;
+        return take;
+    }
+
+    public int64 size() { return (int64) this.snap.count(); }
+
+    public void close() { return; }
+}

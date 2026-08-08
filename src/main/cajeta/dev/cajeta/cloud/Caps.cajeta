@@ -1,0 +1,24 @@
+package dev.cajeta.cloud;
+
+/**
+ * Capability NAMES (spec §3). Partial support is expressed by GRANULAR
+ * names, not tri-states (§3.4's resolution): an adapter with
+ * conditional create but not conditional overwrite declares
+ * `COND_PUT_CREATE` and omits `COND_PUT_OVERWRITE` — no boolean is
+ * forced to lie.
+ */
+public final class Caps {
+
+    // Object store.
+    public static #String COND_PUT_CREATE()    { String s = "object.conditional-put-create";    return #s; }
+    public static #String COND_PUT_OVERWRITE() { String s = "object.conditional-put-overwrite"; return #s; }
+    public static #String SERVER_SIDE_COPY()   { String s = "object.server-side-copy";          return #s; }
+    public static #String LIST_ORDERED()       { String s = "object.list-lexicographic";        return #s; }
+    public static #String READ_AFTER_WRITE()   { String s = "object.read-after-write";          return #s; }
+    public static #String MULTIPART()          { String s = "object.multipart";                 return #s; }
+    public static #String RANGE_READ()         { String s = "object.range-read";                return #s; }
+
+    // Stream.
+    public static #String RESHARDING()         { String s = "stream.resharding";                return #s; }
+    public static #String START_AT_TIMESTAMP() { String s = "stream.start-at-timestamp";        return #s; }
+}

@@ -1,0 +1,65 @@
+package dev.cajeta.cloud.object;
+
+import cajeta.lang.String;
+import dev.cajeta.cloud.CloudException;
+
+/**
+ * The memory driver's writer: chunks accumulate privately; NOTHING is
+ * visible until {@link #complete} installs atomically through the
+ * store's lock (spec §4.1, §4.4). {@link #abort} discards.
+ */
+final class MemoryWriter implements ObjectWriter {
+
+    MemState st;
+    String key;
+    String contentType;
+    int8[] buf;
+    int64 len;
+    boolean open;
+
+    MemoryWriter(MemState st, String key,
+                 String contentType) {
+        this.st = st;
+        this.key = "" + key;
+        this.contentType = "" + contentType;
+        this.buf #= heap int8[256];
+        this.len = 0;
+        this.open = true;
+        return;
+    }
+
+    public void write(int8[] chunk, int64 n) {
+        if (!this.open) {
+            throw heap CloudException(CloudException.PROVIDER_ERROR(),
+                "memory", "write", this.key, "writer already closed");
+        }
+        while (this.len + n > (int64) this.buf.count()) {
+            int8[] bigger = heap int8[(int64) this.buf.count() * 2];
+            int64 i = 0;
+            while (i < this.len) { bigger[i] = this.buf[i]; i = i + 1; }
+            this.buf #= bigger;
+        }
+        int64 i2 = 0;
+        while (i2 < n) {
+            this.buf[this.len + i2] = chunk[i2];
+            i2 = i2 + 1;
+        }
+        this.len = this.len + n;
+        return;
+    }
+
+    public #String complete() {
+        if (!this.open) {
+            throw heap CloudException(CloudException.PROVIDER_ERROR(),
+                "memory", "complete", this.key, "writer already closed");
+        }
+        this.open = false;
+        return this.st.install(this.key, this.buf, this.len,
+                               this.contentType);
+    }
+
+    public void abort() {
+        this.open = false;
+        return;
+    }
+}

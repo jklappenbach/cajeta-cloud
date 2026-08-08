@@ -1,0 +1,84 @@
+package dev.cajeta.cloud.object;
+
+import cajeta.lang.String;
+import dev.cajeta.cloud.Capabilities;
+import dev.cajeta.cloud.CloudStats;
+
+/**
+ * THE object-store port (spec §4–§8). Code depends on this interface
+ * alone — never a provider SDK (§2.1) — and every adapter passes the
+ * conformance suite in `dev.cajeta.cloud.testkit`.
+ *
+ * Contracts every implementation carries:
+ * - `put` is ATOMIC (§4.1): a reader sees the whole prior object or
+ *   the whole new one, never a mixture.
+ * - a missing key is an EXPLICIT absence — `get` throws
+ *   `CloudException(NOT_FOUND)`, `stat` answers `exists=false` (§4.2).
+ * - `delete` reports whether the object existed (§4.3).
+ * - `getRange` transfers ONLY the requested bytes; an unsatisfiable
+ *   offset fails explicitly (§6) — cajeta-dqe's column pruning rests
+ *   on this.
+ * - conditional writes (§7): `putIfAbsent` / `putIfMatch` race under
+ *   optimistic concurrency; EXACTLY ONE of two racing writers wins,
+ *   and the loser's {@link CondResult} tells it so, with the current
+ *   token to re-read against. Gated by the `Caps.COND_PUT_*`
+ *   capabilities — an adapter that cannot guarantee them DECLARES
+ *   that, so designs depending on them fail at startup (§7.5).
+ * - multipart (§8): an incomplete upload is never a readable object.
+ */
+public interface ObjectStore {
+
+    /** The adapter's declared capabilities (§3.1). */
+    Capabilities capabilities();
+
+    /** Operability counters (§11.4). */
+    CloudStats stats();
+
+    /** Atomic full-object put; returns the new version token. */
+    #String put(String key, int8[] bytes, String contentType);
+
+    /** The object's bytes; throws NOT_FOUND on absence (§4.2). */
+    #int8[] get(String key);
+
+    /** Metadata + existence in one answer (§4.2). */
+    #StatResult stat(String key);
+
+    /**
+     * Bytes `[offset, offset+length)`, clamped at the object's end
+     * (HTTP semantics, documented); an offset at/past the end throws
+     * (§6.2). Only the requested bytes are transferred (§6.1).
+     */
+    #int8[] getRange(String key, int64 offset, int64 length);
+
+    /** Delete; TRUE when the object existed (§4.3). */
+    boolean delete(String key);
+
+    /**
+     * Server-side copy where the capability is declared (§4.5); guarded
+     * by `Caps.SERVER_SIDE_COPY`.
+     */
+    #String copy(String srcKey, String dstKey);
+
+    /**
+     * One page of keys under `prefix` (§5): `delimiter` "" for a flat
+     * listing, `token` "" to start, `maxKeys` bounds the page.
+     */
+    #ListPage list(String prefix, String delimiter, String token,
+                   int64 maxKeys);
+
+    /** Incremental read without materializing (§4.4). */
+    #ObjectReader openRead(String key);
+
+    /** Incremental write; nothing is visible until `complete` (§4.4). */
+    #ObjectWriter openWrite(String key, String contentType);
+
+    /** Multipart upload (§8); incomplete uploads are never readable. */
+    #MultipartUpload beginMultipart(String key, String contentType);
+
+    /** Put only when `key` is ABSENT (§7.1); the loser learns it lost. */
+    #CondResult putIfAbsent(String key, int8[] bytes, String contentType);
+
+    /** Put only when the stored token matches `etag` (§7.2). */
+    #CondResult putIfMatch(String key, int8[] bytes, String contentType,
+                           String etag);
+}

@@ -1,0 +1,22 @@
+package dev.cajeta.cloud;
+
+/**
+ * cajeta-cloud — one platform-agnostic API for the services every
+ * cloud provides. Ports + in-memory drivers + conformance testkits,
+ * NOTHING else (spec §1.4): `capabilities: []`, no filesystem, no
+ * network, no provider SDK. Every real backend is a separate adapter
+ * artifact that implements a port and passes its conformance suite.
+ *
+ * Verticals in this release: the OBJECT-STORE port (§4–§8, including
+ * the conditional writes cajeta-dqe's no-consensus design rests on)
+ * and the STREAM port (§12, shaped against Kinesis and Kafka).
+ *
+ * This is the library entry class (the `--emit=cja` root).
+ */
+public final class Cloud {
+    /** The library version. */
+    public static #String version() { return "0.1.0"; }
+
+    /** `--emit=cja` entry. */
+    public static int32 run() { return 0; }
+}

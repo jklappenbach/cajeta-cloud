@@ -1,0 +1,37 @@
+package dev.cajeta.cloud;
+
+import cajeta.error.RecoverableException;
+import cajeta.lang.String;
+
+/**
+ * The error taxonomy every port shares (spec §11.1): retry logic
+ * cannot be written against one opaque failure, so every error carries
+ * a KIND — {@link #NOT_FOUND}, {@link #ACCESS_DENIED},
+ * {@link #PRECONDITION_FAILED}, {@link #TRANSIENT},
+ * {@link #PROVIDER_ERROR} — and the message names the provider, the
+ * operation, and the key (§11.3), never a bare status code.
+ */
+public class CloudException extends RecoverableException {
+
+    public static int32 NOT_FOUND()           { return 0; }
+    public static int32 ACCESS_DENIED()       { return 1; }
+    public static int32 PRECONDITION_FAILED() { return 2; }
+    public static int32 TRANSIENT()           { return 3; }
+    public static int32 PROVIDER_ERROR()      { return 4; }
+
+    int32 kindCode;
+
+    public CloudException(int32 kind, String provider, String operation,
+                          String key, String detail) {
+        this.kindCode = kind;
+        this.message = provider + ": " + operation + " '" + key + "': "
+            + detail;
+        this.cause = 0;
+    }
+
+    /** The failure kind (see the constants). */
+    public int32 kind() { return this.kindCode; }
+
+    /** True when retry may help (§11.2). */
+    public boolean isTransient() { return this.kindCode == 3; }
+}

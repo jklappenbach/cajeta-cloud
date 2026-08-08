@@ -1,0 +1,118 @@
+package dev.cajeta.cloud;
+
+import cajeta.collection.ArrayList;
+import cajeta.lang.String;
+
+/**
+ * Capability negotiation (spec §3): a DEFINITIVE answer before any
+ * operation runs. An adapter declares its capabilities (with a caveat
+ * note per capability, §3.5); consumers query with {@link #supports},
+ * guard invocations with {@link #require} (fails NAMING the capability
+ * and the adapter, §3.2), and pin deployments with
+ * {@link #assertAll} at STARTUP — so a misconfigured deployment fails
+ * on launch rather than mid-write (§3.3; cajeta-dqe asserts
+ * conditional put this way).
+ *
+ * Storage is a pair of parallel ArrayLists, NOT HashMap<String,String>:
+ * a String-VALUED HashMap double-frees its stored strings on drop
+ * under v0.17.4 (registered toolchain defect; every shipped map uses
+ * non-String values, which is why it never surfaced before). Adapters
+ * declare fewer than a dozen capabilities, so the linear scan is free.
+ */
+public final class Capabilities {
+
+    String adapter;
+    ArrayList<String> names;
+    ArrayList<String> notes;       // parallel to names
+
+    public Capabilities(String adapterName) {
+        this.adapter = "" + adapterName;
+        this.names = heap ArrayList<String>();
+        this.notes = heap ArrayList<String>();
+        return;
+    }
+
+    /** Declare a capability with its provider caveat ("" for none). */
+    public void declare(String capability, String caveat) {
+        int32 at = this.indexOf(capability);
+        if (at >= 0) {
+            String v0 = "" + caveat;
+            this.notes.set(at, #v0);
+            return;
+        }
+        String k = "" + capability;
+        this.names.add(#k);
+        String v = "" + caveat;
+        this.notes.add(#v);
+        return;
+    }
+
+    int32 indexOf(String capability) {
+        int32 i = 0;
+        while (i < this.names.count()) {
+            if (this.names.get(i).equals(capability)) { return i; }
+            i = i + 1;
+        }
+        return -1;
+    }
+
+    /** The adapter's name (appears in every failure message). */
+    public #String adapterName() {
+        String out = "" + this.adapter;
+        return #out;
+    }
+
+    /** Definitive support answer, before any operation (§3.1). */
+    public boolean supports(String capability) {
+        return this.indexOf(capability) >= 0;
+    }
+
+    /** The declared caveat for a capability ("" when none/undeclared). */
+    public #String caveatFor(String capability) {
+        int32 at = this.indexOf(capability);
+        if (at < 0) {
+            String e = "";
+            return #e;
+        }
+        String out = "" + this.notes.get(at);
+        return #out;
+    }
+
+    /**
+     * Guard an invocation (§3.2): unsupported → immediate failure
+     * naming the capability AND the adapter. Never a silent no-op,
+     * never a degraded substitute.
+     */
+    public void require(String capability, String operation, String key) {
+        if (!this.supports(capability)) {
+            throw heap CloudException(CloudException.PROVIDER_ERROR(),
+                this.adapter, operation, key,
+                "capability '" + capability + "' is NOT supported by "
+                + "adapter '" + this.adapter + "'");
+        }
+        return;
+    }
+
+    /**
+     * The STARTUP assertion (§3.3): all-or-throw, listing every missing
+     * capability at once, so a deployment fails on launch.
+     */
+    public void assertAll(String[] required) {
+        String missing = "";
+        int64 i = 0;
+        while (i < (int64) required.count()) {
+            if (!this.supports(required[i])) {
+                if (missing.count() > 0) { missing = missing + ", "; }
+                missing = missing + required[i];
+            }
+            i = i + 1;
+        }
+        if (missing.count() > 0) {
+            throw heap CloudException(CloudException.PROVIDER_ERROR(),
+                this.adapter, "assertCapabilities", "-",
+                "adapter '" + this.adapter + "' lacks required "
+                + "capabilities: " + missing);
+        }
+        return;
+    }
+}

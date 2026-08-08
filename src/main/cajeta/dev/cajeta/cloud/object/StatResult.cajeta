@@ -1,0 +1,27 @@
+package dev.cajeta.cloud.object;
+
+import cajeta.lang.String;
+
+/**
+ * Existence + metadata in one answer (spec §4.2): a missing key is an
+ * EXPLICIT absence — `exists` is false and the metadata fields are
+ * meaningless — never a null and never an empty buffer.
+ */
+public final class StatResult {
+
+    public boolean exists;
+    public int64 size;
+    public String contentType;
+    public int64 lastModified;
+    public String etag;
+
+    StatResult(boolean exists, int64 size, #String contentType,
+               int64 lastModified, #String etag) {
+        this.exists = exists;
+        this.size = size;
+        this.contentType #= contentType;
+        this.lastModified = lastModified;
+        this.etag #= etag;
+        return;
+    }
+}

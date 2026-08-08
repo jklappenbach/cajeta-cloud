@@ -1,0 +1,20 @@
+package dev.cajeta.cloud.object;
+
+import cajeta.lang.String;
+
+/**
+ * Incremental object writing (spec §4.4): push chunks; NOTHING is
+ * visible until {@link #complete} installs the object atomically
+ * (§4.1). {@link #abort} discards everything written so far.
+ */
+public interface ObjectWriter {
+
+    /** Append `len` bytes from `chunk`. */
+    void write(int8[] chunk, int64 len);
+
+    /** Install atomically; returns the new version token. */
+    #String complete();
+
+    /** Discard; the target key is untouched. */
+    void abort();
+}

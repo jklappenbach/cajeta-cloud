@@ -1,0 +1,21 @@
+package dev.cajeta.cloud.object;
+
+import cajeta.lang.String;
+
+/** Package-private stored object for the memory driver. */
+final class Blob {
+
+    int8[] bytes;
+    String contentType;
+    int64 modified;
+    String etag;
+
+    Blob(#int8[] bytes, #String contentType, int64 modified,
+         #String etag) {
+        this.bytes #= bytes;
+        this.contentType #= contentType;
+        this.modified = modified;
+        this.etag #= etag;
+        return;
+    }
+}

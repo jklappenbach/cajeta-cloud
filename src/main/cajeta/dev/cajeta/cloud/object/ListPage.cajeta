@@ -1,0 +1,67 @@
+package dev.cajeta.cloud.object;
+
+import cajeta.lang.String;
+
+/**
+ * One page of a listing (spec §5): keys with size/last-modified/etag,
+ * common prefixes under a delimiter, and a CONTINUATION TOKEN (`""` at
+ * the end) so a large namespace never has to fit in memory (§5.2).
+ * `ordered` states the documented guarantee (§5.4): true only when the
+ * adapter promises lexicographic order — code that assumes sorted keys
+ * against an unordered provider breaks silently, so the promise is
+ * carried in-band.
+ */
+public final class ListPage {
+
+    String[] keyArr;
+    int64[] sizeArr;
+    int64[] modArr;
+    String[] etagArr;
+    String[] prefixArr;
+    String token;
+    public boolean ordered;
+
+    ListPage(#String[] keys, #int64[] sizes, #int64[] mods,
+             #String[] etags, #String[] prefixes, #String token,
+             boolean ordered) {
+        this.keyArr #= keys;
+        this.sizeArr #= sizes;
+        this.modArr #= mods;
+        this.etagArr #= etags;
+        this.prefixArr #= prefixes;
+        this.token #= token;
+        this.ordered = ordered;
+        return;
+    }
+
+    /** Keys on this page. */
+    public int64 count() { return (int64) this.keyArr.count(); }
+
+    public #String keyAt(int64 i) {
+        String out = "" + this.keyArr[i];
+        return #out;
+    }
+
+    public int64 sizeAt(int64 i) { return this.sizeArr[i]; }
+
+    public int64 lastModifiedAt(int64 i) { return this.modArr[i]; }
+
+    public #String etagAt(int64 i) {
+        String out = "" + this.etagArr[i];
+        return #out;
+    }
+
+    /** Common prefixes under the delimiter (§5.3). */
+    public int64 prefixCount() { return (int64) this.prefixArr.count(); }
+
+    public #String prefixAt(int64 i) {
+        String out = "" + this.prefixArr[i];
+        return #out;
+    }
+
+    /** Continuation token; "" means the listing is complete (§5.2). */
+    public #String nextToken() {
+        String out = "" + this.token;
+        return #out;
+    }
+}

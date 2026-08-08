@@ -1,0 +1,22 @@
+package dev.cajeta.cloud.object;
+
+import cajeta.lang.String;
+
+/**
+ * The outcome of a conditional write (spec §7.1–§7.4): LOSING IS NOT AN
+ * EXCEPTION — it is the expected other half of optimistic concurrency.
+ * `won` says which side of the race this writer was on; `etag` is the
+ * winner's new token on a win, and the CURRENT stored token on a loss —
+ * exactly what the loser needs to re-read and retry.
+ */
+public final class CondResult {
+
+    public boolean won;
+    public String etag;
+
+    CondResult(boolean won, #String etag) {
+        this.won = won;
+        this.etag #= etag;
+        return;
+    }
+}

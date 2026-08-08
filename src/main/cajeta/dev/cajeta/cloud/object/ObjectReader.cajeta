@@ -1,0 +1,18 @@
+package dev.cajeta.cloud.object;
+
+/**
+ * Incremental object reading (spec §4.4): pull chunks without
+ * materializing the whole object. `read` fills up to `max` bytes into
+ * `buf` and returns the count, or −1 at the end.
+ */
+public interface ObjectReader {
+
+    /** Fill up to `max` bytes; returns bytes read, −1 at end. */
+    int64 read(int8[] buf, int64 max);
+
+    /** Total object size. */
+    int64 size();
+
+    /** Release the reader. */
+    void close();
+}

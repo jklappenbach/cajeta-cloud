@@ -1,0 +1,26 @@
+package dev.cajeta.cloud.object;
+
+import cajeta.lang.String;
+
+/**
+ * Object metadata (spec §4.2, §7.3): size, content type, last-modified,
+ * and the VERSION TOKEN (etag) conditional writes compare against. The
+ * memory driver's timestamps are logical (monotonic), documented as
+ * such; provider adapters carry real clocks.
+ */
+public final class ObjectMeta {
+
+    public int64 size;
+    public String contentType;
+    public int64 lastModified;
+    public String etag;
+
+    ObjectMeta(int64 size, #String contentType, int64 lastModified,
+               #String etag) {
+        this.size = size;
+        this.contentType #= contentType;
+        this.lastModified = lastModified;
+        this.etag #= etag;
+        return;
+    }
+}

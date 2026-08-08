@@ -1,0 +1,331 @@
+package dev.cajeta.cloud.object;
+
+import cajeta.collection.ArrayList;
+import cajeta.concurrent.LockGuard;
+import cajeta.lang.String;
+import dev.cajeta.cloud.Capabilities;
+import dev.cajeta.cloud.Caps;
+import dev.cajeta.cloud.CloudException;
+import dev.cajeta.cloud.CloudStats;
+
+/**
+ * The in-memory driver (spec §1.4, §9.4) — the ONLY implementation
+ * that can live in the interface library (`capabilities: []` forbids a
+ * filesystem one), and a FAITHFUL one: its conditional writes LOSE
+ * when they should (§14.4 — a driver that always wins makes every
+ * concurrency test lie), its put is atomic under real fiber
+ * concurrency (one Lock guards all state), and its listings are
+ * lexicographic and declared so.
+ *
+ * Timestamps are LOGICAL (a monotonic sequence shared with etags).
+ * All mutable state lives in {@link MemState}, which writers and
+ * multipart uploads share directly — see MemState for why.
+ */
+public final class MemoryObjectStore implements ObjectStore {
+
+    MemState st;
+    Capabilities caps;
+
+    public MemoryObjectStore() {
+        this.st = heap MemState();
+        Capabilities c = heap Capabilities("memory");
+        c.declare(Caps.COND_PUT_CREATE(), "");
+        c.declare(Caps.COND_PUT_OVERWRITE(), "");
+        c.declare(Caps.SERVER_SIDE_COPY(), "");
+        c.declare(Caps.LIST_ORDERED(), "");
+        c.declare(Caps.READ_AFTER_WRITE(),
+            "strong: same-fiber and cross-fiber");
+        c.declare(Caps.MULTIPART(), "parts held in memory until complete");
+        c.declare(Caps.RANGE_READ(), "");
+        this.caps #= c;
+        return;
+    }
+
+    public Capabilities capabilities() { return this.caps; }
+
+    public CloudStats stats() { return this.st.statsObj; }
+
+    public #String put(String key, int8[] bytes, String contentType) {
+        return this.st.install(key, bytes, (int64) bytes.count(),
+                               contentType);
+    }
+
+    public #int8[] get(String key) {
+        LockGuard g = this.st.lock.acquire();
+        Blob b = this.st.blobs.get(key);
+        if (b == null) {
+            this.st.statsObj.recordCall((int64) 0, (int64) 0, (int64) 0,
+                                        true);
+            throw heap CloudException(CloudException.NOT_FOUND(),
+                "memory", "get", key, "no such object");
+        }
+        int64 n = (int64) b.bytes.count();
+        int8[] out = heap int8[n];
+        int64 i = 0;
+        while (i < n) { out[i] = b.bytes[i]; i = i + 1; }
+        this.st.statsObj.recordCall((int64) 0, (int64) 0, n, false);
+        return #out;
+    }
+
+    public #StatResult stat(String key) {
+        LockGuard g = this.st.lock.acquire();
+        Blob b = this.st.blobs.get(key);
+        this.st.statsObj.recordCall((int64) 0, (int64) 0, (int64) 0,
+                                    false);
+        if (b == null) {
+            String e1 = "";
+            String e2 = "";
+            StatResult r = heap StatResult(false, (int64) 0, #e1,
+                (int64) 0, #e2);
+            return #r;
+        }
+        String ct = "" + b.contentType;
+        String et = "" + b.etag;
+        StatResult r = heap StatResult(true, (int64) b.bytes.count(),
+            #ct, b.modified, #et);
+        return #r;
+    }
+
+    public #int8[] getRange(String key, int64 offset, int64 length) {
+        LockGuard g = this.st.lock.acquire();
+        Blob b = this.st.blobs.get(key);
+        if (b == null) {
+            this.st.statsObj.recordCall((int64) 0, (int64) 0, (int64) 0,
+                                        true);
+            throw heap CloudException(CloudException.NOT_FOUND(),
+                "memory", "getRange", key, "no such object");
+        }
+        int64 size = (int64) b.bytes.count();
+        if (offset < 0 || length < 1 || offset >= size) {
+            this.st.statsObj.recordCall((int64) 0, (int64) 0, (int64) 0,
+                                        true);
+            throw heap CloudException(CloudException.PROVIDER_ERROR(),
+                "memory", "getRange", key, "unsatisfiable range: offset "
+                + offset + " length " + length + " against size " + size);
+        }
+        int64 end = offset + length;
+        if (end > size) { end = size; }                 // HTTP clamp
+        int64 n = end - offset;
+        int8[] out = heap int8[n];
+        int64 i = 0;
+        while (i < n) { out[i] = b.bytes[offset + i]; i = i + 1; }
+        this.st.statsObj.recordCall((int64) 0, (int64) 0, n, false);
+        return #out;
+    }
+
+    public boolean delete(String key) {
+        LockGuard g = this.st.lock.acquire();
+        boolean existed = this.st.blobs.containsKey(key);
+        if (existed) {
+            Blob dropped = this.st.blobs.remove(key);
+            int32 i = 0;
+            while (i < this.st.sorted.count()) {
+                if (this.st.sorted.get(i).equals(key)) {
+                    String droppedKey = this.st.sorted.removeAt(i);
+                    i = this.st.sorted.count();
+                } else {
+                    i = i + 1;
+                }
+            }
+        }
+        this.st.statsObj.recordCall((int64) 0, (int64) 0, (int64) 0,
+                                    false);
+        return existed;
+    }
+
+    public #String copy(String srcKey, String dstKey) {
+        this.caps.require(Caps.SERVER_SIDE_COPY(), "copy", srcKey);
+        LockGuard g = this.st.lock.acquire();
+        Blob b = this.st.blobs.get(srcKey);
+        if (b == null) {
+            this.st.statsObj.recordCall((int64) 0, (int64) 0, (int64) 0,
+                                        true);
+            throw heap CloudException(CloudException.NOT_FOUND(),
+                "memory", "copy", srcKey, "no such object");
+        }
+        String etag = this.st.installLocked(dstKey, b.bytes,
+            (int64) b.bytes.count(), b.contentType);
+        this.st.statsObj.recordCall((int64) 0, (int64) 0, (int64) 0,
+                                    false);
+        return #etag;
+    }
+
+    public #ListPage list(String prefix, String delimiter, String token,
+                          int64 maxKeys) {
+        if (maxKeys < 1) {
+            throw heap CloudException(CloudException.PROVIDER_ERROR(),
+                "memory", "list", prefix, "maxKeys must be >= 1");
+        }
+        LockGuard g = this.st.lock.acquire();
+        ArrayList<String> keys = heap ArrayList<String>();
+        ArrayList<String> prefixes = heap ArrayList<String>();
+        String next = "";
+        int32 i = 0;
+        while (i < this.st.sorted.count()) {
+            String k = this.st.sorted.get(i);
+            boolean afterToken = token.count() == 0
+                || MemState.less(token, k);
+            if (afterToken && MemoryObjectStore.hasPrefix(k, prefix)) {
+                if (delimiter.count() > 0) {
+                    int64 dpos = MemoryObjectStore.indexAfterPrefix(k,
+                        prefix, delimiter);
+                    if (dpos >= 0) {
+                        // Grouped under a common prefix.
+                        String cp = k.substring((int32) 0,
+                            (int32) dpos + delimiter.byteLength());
+                        boolean seen = false;
+                        int32 p = 0;
+                        while (p < prefixes.count()) {
+                            if (prefixes.get(p).equals(cp)) { seen = true; }
+                            p = p + 1;
+                        }
+                        if (!seen) {
+                            if ((int64) (keys.count() + prefixes.count())
+                                >= maxKeys) {
+                                next = "" + this.st.sorted.get(i - 1);
+                                i = this.st.sorted.count();
+                            } else {
+                                prefixes.add(#cp);
+                            }
+                        }
+                        i = i + 1;
+                    } else {
+                        if ((int64) (keys.count() + prefixes.count())
+                            >= maxKeys) {
+                            next = "" + this.st.sorted.get(i - 1);
+                            i = this.st.sorted.count();
+                        } else {
+                            String kk = "" + k;
+                            keys.add(#kk);
+                            i = i + 1;
+                        }
+                    }
+                } else {
+                    if ((int64) keys.count() >= maxKeys) {
+                        next = "" + this.st.sorted.get(i - 1);
+                        i = this.st.sorted.count();
+                    } else {
+                        String kk = "" + k;
+                        keys.add(#kk);
+                        i = i + 1;
+                    }
+                }
+            } else {
+                i = i + 1;
+            }
+        }
+        int64 nk = (int64) keys.count();
+        String[] ka = heap String[nk];
+        int64[] sa = heap int64[nk];
+        int64[] ma = heap int64[nk];
+        String[] ea = heap String[nk];
+        int64 t = 0;
+        while (t < nk) {
+            ka[t] = "" + keys.get((int32) t);
+            Blob b = this.st.blobs.get(ka[t]);
+            sa[t] = (int64) b.bytes.count();
+            ma[t] = b.modified;
+            ea[t] = "" + b.etag;
+            t = t + 1;
+        }
+        int64 np = (int64) prefixes.count();
+        String[] pa = heap String[np];
+        t = 0;
+        while (t < np) {
+            pa[t] = "" + prefixes.get((int32) t);
+            t = t + 1;
+        }
+        this.st.statsObj.recordCall((int64) 0, (int64) 0, (int64) 0,
+                                    false);
+        ListPage page = heap ListPage(#ka, #sa, #ma, #ea, #pa, #next,
+                                      true);
+        return #page;
+    }
+
+    static boolean hasPrefix(String k, String prefix) {
+        if (prefix.count() == 0) { return true; }
+        return k.startsWith(prefix);
+    }
+
+    /** Byte index of `delimiter` in `k` after `prefix`, or −1. */
+    static int64 indexAfterPrefix(String k, String prefix,
+                                  String delimiter) {
+        int64 from = (int64) prefix.byteLength();
+        String tail = k.substring((int32) from, k.byteLength());
+        int64 rel = tail.indexOf(delimiter);
+        if (rel < 0) { return -1; }
+        return from + rel;
+    }
+
+    public #ObjectReader openRead(String key) {
+        LockGuard g = this.st.lock.acquire();
+        Blob b = this.st.blobs.get(key);
+        if (b == null) {
+            throw heap CloudException(CloudException.NOT_FOUND(),
+                "memory", "openRead", key, "no such object");
+        }
+        // Snapshot: the reader sees the WHOLE object as of open (§4.1).
+        int64 n = (int64) b.bytes.count();
+        int8[] snap = heap int8[n];
+        int64 i = 0;
+        while (i < n) { snap[i] = b.bytes[i]; i = i + 1; }
+        this.st.statsObj.recordCall((int64) 0, (int64) 0, n, false);
+        MemoryReader r = heap MemoryReader(#snap);
+        return #r;
+    }
+
+    public #ObjectWriter openWrite(String key, String contentType) {
+        MemoryWriter w = heap MemoryWriter(this.st, key, contentType);
+        return #w;
+    }
+
+    public #MultipartUpload beginMultipart(String key,
+                                           String contentType) {
+        this.caps.require(Caps.MULTIPART(), "beginMultipart", key);
+        MemoryMultipart m = heap MemoryMultipart(this.st, key,
+                                                 contentType);
+        return #m;
+    }
+
+    public #CondResult putIfAbsent(String key, int8[] bytes,
+                                   String contentType) {
+        this.caps.require(Caps.COND_PUT_CREATE(), "putIfAbsent", key);
+        LockGuard g = this.st.lock.acquire();
+        Blob cur = this.st.blobs.get(key);
+        if (cur != null) {
+            // The loser learns it lost, with the current token (§7.1).
+            String et = "" + cur.etag;
+            this.st.statsObj.recordCall((int64) 0, (int64) 0, (int64) 0,
+                                        false);
+            CondResult r = heap CondResult(false, #et);
+            return #r;
+        }
+        String etag = this.st.installLocked(key, bytes,
+            (int64) bytes.count(), contentType);
+        this.st.statsObj.recordCall((int64) 0, (int64) bytes.count(),
+            (int64) 0, false);
+        CondResult r = heap CondResult(true, #etag);
+        return #r;
+    }
+
+    public #CondResult putIfMatch(String key, int8[] bytes,
+                                  String contentType, String etag) {
+        this.caps.require(Caps.COND_PUT_OVERWRITE(), "putIfMatch", key);
+        LockGuard g = this.st.lock.acquire();
+        Blob cur = this.st.blobs.get(key);
+        if (cur == null || !cur.etag.equals(etag)) {
+            String et = "";
+            if (cur != null) { et = "" + cur.etag; }
+            this.st.statsObj.recordCall((int64) 0, (int64) 0, (int64) 0,
+                                        false);
+            CondResult r = heap CondResult(false, #et);
+            return #r;
+        }
+        String newTag = this.st.installLocked(key, bytes,
+            (int64) bytes.count(), contentType);
+        this.st.statsObj.recordCall((int64) 0, (int64) bytes.count(),
+            (int64) 0, false);
+        CondResult r = heap CondResult(true, #newTag);
+        return #r;
+    }
+}

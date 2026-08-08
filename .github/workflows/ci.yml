@@ -1,0 +1,131 @@
+# CI + release for the cajeta-cloud library (.cja) — the ecosystem-
+# standard shape (cajeta-ml's workflow):
+#
+#   - push to main         → build + test (no publish)
+#   - push a `v*` tag      → build + test + publish (GitHub Release + Olla)
+#   - workflow_dispatch    → dry-run (build+test) or production (also publishes)
+#
+# Bare-runner flow: install the pinned cajeta toolchain from the cajeta
+# repo's GitHub Release; ./run-tests.sh takes its Olla-fetch path for
+# dev.cajeta.unit and dev.cajeta.ml. The Olla publish self-arms when OLLA_*
+# secrets exist on this repo; until then releases bridge via cajeta-logging's
+# publish-sibling workflow (authorized 2026-07-29).
+
+name: ci
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'Release mode'
+        required: true
+        type: choice
+        default: 'dry-run'
+        options: [dry-run, production]
+
+permissions:
+  contents: write
+
+env:
+  # Must match a release tag of jklappenbach/cajeta.
+  #
+  # v0.17.4 is the floor for this library: it is the first release whose
+  # stdlib carries BOTH cajeta.math.optim (L-BFGS/Nelder-Mead — the MA/ARMA
+  # likelihood path is estimated through it, stdlib-completion U5) at a
+  # deterministic-compilation baseline AND the current cajeta.math surface
+  # (fft for §6.5 autocovariance, stats for test p-values). Do not pin back.
+  CAJETA_VERSION: v0.17.4
+
+jobs:
+  build-test:
+    name: build + test (x86_64-linux)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout cajeta-cloud
+        uses: actions/checkout@v4
+
+      - name: Install cajeta toolchain (${{ env.CAJETA_VERSION }})
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release download "$CAJETA_VERSION" --repo jklappenbach/cajeta \
+            --pattern 'cajeta_*_amd64.deb' --dir /tmp
+          sudo apt-get update
+          sudo apt-get install -y /tmp/cajeta_*_amd64.deb
+          cajeta --version || true
+
+      - name: Run the test suite
+        timeout-minutes: 30
+        run: ./run-tests.sh
+
+      - name: Run the tour (self-checking)
+        timeout-minutes: 20
+        run: ./run-tour.sh
+
+      - name: Build the release .cja
+        id: build
+        run: |
+          set -euo pipefail
+          # cajeta.json is the single source of truth for the version; it is
+          # JSONC, so read it through the toolchain, not jq.
+          VERSION="$(cajeta info | awk '/^[[:space:]]*version:/{print $2; exit}')"
+          if [ -z "$VERSION" ]; then
+            echo "::error::could not read version from cajeta.json via 'cajeta info'" >&2
+            exit 1
+          fi
+          if [ "${GITHUB_REF_TYPE:-}" = "tag" ]; then
+            tag_version="${GITHUB_REF_NAME#v}"
+            if [ "$tag_version" != "$VERSION" ]; then
+              echo "::error::tag v${tag_version} disagrees with cajeta.json version ${VERSION} — bump the manifest or retag" >&2
+              exit 1
+            fi
+          fi
+          cajeta build
+          art="build/archive/dev.cajeta.cloud-${VERSION}.cja"
+          [ -f "$art" ] || { echo "::error::expected $art after cajeta build" >&2; exit 1; }
+          echo "artifact=$art" >> "$GITHUB_OUTPUT"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Upload .cja as a build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: cajeta-cloud-${{ steps.build.outputs.version }}
+          path: ${{ steps.build.outputs.artifact }}
+
+      - name: Publish Release
+        if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.mode == 'production')
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || format('v{0}', steps.build.outputs.version) }}
+          name: cajeta-cloud ${{ steps.build.outputs.version }}
+          generate_release_notes: true
+          files: ${{ steps.build.outputs.artifact }}
+
+      # Secrets cannot appear in `if:` directly, hence the detect step. Until
+      # OLLA_* secrets are set on THIS repo, publishes bridge via
+      # cajeta-logging's publish-sibling workflow and this step skips loudly.
+      - name: Detect Olla credentials
+        id: creds
+        env:
+          T: ${{ secrets.OLLA_TOKEN }}
+        run: |
+          if [ -n "$T" ]; then
+            echo "have=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "have=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::no OLLA_* secrets on this repo — the Olla publish is SKIPPED; bridge via cajeta-logging's publish-sibling or add the secrets"
+          fi
+
+      - name: Publish to Olla
+        if: (startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.mode == 'production')) && steps.creds.outputs.have == 'true'
+        uses: jklappenbach/cajeta/.github/actions/olla-publish@main
+        with:
+          cja-path: ${{ steps.build.outputs.artifact }}
+          version: ${{ steps.build.outputs.version }}
+          token: ${{ secrets.OLLA_TOKEN }}
+          signing-key-pem: ${{ secrets.OLLA_SIGNING_KEY_PEM }}
+          signing-key-id: ${{ secrets.OLLA_SIGNING_KEY_ID }}

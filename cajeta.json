@@ -1,0 +1,94 @@
+{
+    // cajeta-cloud — ONE platform-agnostic API for the services every
+    // cloud provides. Code is written against a PORT; a provider
+    // adapter (a SEPARATE artifact: cajeta-cloud-aws/-azure/-gcp)
+    // binds it to S3, Service Bus, Pub/Sub. Choosing between them is
+    // configuration.
+    //
+    // THE INTERFACE LIBRARY IS PORTS, IN-MEMORY DRIVERS, AND
+    // CONFORMANCE TESTKITS. NOTHING ELSE (spec §1.4): capabilities is
+    // [], and stays [] — a filesystem-backed driver landing here would
+    // force filesystem capability onto every consumer of a pure
+    // interface, and a provider SDK is out of the question. Grown from
+    // the cajeta-cloud-objectstore sample (§13.1): its ObjectStore /
+    // FakeObjectStore / ObjectStoreContract seeded the object port,
+    // the memory driver, and the testkit.
+    //
+    // First verticals: OBJECT STORE (§4–§8 — conditional put is the
+    // primitive cajeta-dqe's no-consensus design rests on) and STREAM
+    // (§12 — shaped against Kinesis AND Kafka, not assumed).
+    //
+    // VERSIONING — `details.version` is the SINGLE source of truth.
+
+    "details": {
+        "name":               "dev.cajeta.cloud",
+        "version":            "0.1.0",
+        "description":        "cajeta-cloud — provider-neutral cloud ports: object store + stream, in-memory drivers, conformance testkits, capability negotiation",
+        "license":            "Apache-2.0",
+        "authors":            ["Julian Klappenbach"],
+        "cajeta-lang-version": "1.0"
+    },
+
+    "settings": {
+        // THE load-bearing line (§14.11): no filesystem, no network.
+        "capabilities": [],
+
+        // No provider SDK, no local backend, no cajeta library — pure
+        // stdlib (§14.13).
+        "dependencies": {},
+
+        "dev-dependencies": {
+            "dev.cajeta.unit": "0.2.0"
+        },
+
+        "repositories": [
+            { "name": "central", "url": "https://olla.cajeta.dev",
+              "priority": 0 }
+        ],
+
+        "build": {
+            "source-root": "src/main/cajeta",
+            "target": "host"
+        }
+    },
+
+    "tasks": {
+
+        "build": {
+            "description": "Compile sources to a .cja library archive",
+            "actions": [
+                { "action": "build", "flavor": "debug", "id": "art" }
+            ],
+            "outputs": { "path": "${art.path}", "sha256": "${art.sha256}" }
+        },
+
+        "test": {
+            "description": "Build + run the library's test suite",
+            "actions": [
+                { "action": "exec", "command": "./run-tests.sh" }
+            ]
+        },
+
+        "tour": {
+            "description": "Build + run the self-checking tour",
+            "actions": [
+                { "action": "exec", "command": "./run-tour.sh" }
+            ]
+        },
+
+        "release": {
+            "description": "Release build of the .cja",
+            "actions": [
+                { "action": "build", "flavor": "release", "id": "art" }
+            ],
+            "outputs": { "path": "${art.path}", "sha256": "${art.sha256}" }
+        },
+
+        "clean": {
+            "description": "Remove build outputs",
+            "actions": [
+                { "action": "exec", "command": "rm -rf build" }
+            ]
+        }
+    }
+}

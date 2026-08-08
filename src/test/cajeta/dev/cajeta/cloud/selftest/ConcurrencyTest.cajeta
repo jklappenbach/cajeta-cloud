@@ -1,0 +1,119 @@
+package dev.cajeta.cloud.selftest;
+
+import cajeta.concurrent.AtomicInt64;
+import dev.cajeta.unit.Assert;
+import dev.cajeta.cloud.object.CondResult;
+import dev.cajeta.cloud.object.MemoryObjectStore;
+
+/**
+ * cajeta-cloud 3.1.11 — conditional writes under REAL fiber
+ * concurrency, not a sequential simulation: racing fibers spawned in a
+ * `scope` genuinely interleave on the carrier pool, and exactly one
+ * putIfAbsent (and exactly one putIfMatch per generation) may win.
+ * This is the primitive cajeta-dqe's no-consensus commit stands on —
+ * if two writers can both think they won here, distributed queries
+ * corrupt silently.
+ */
+public class ConcurrencyTest {
+
+    public ConcurrencyTest() { return; }
+
+    static async void createRacer(MemoryObjectStore s, AtomicInt64 wins,
+                                  int32 id) {
+        int8[] payload = heap int8[1];
+        payload[0] = (int8) id;
+        CondResult r = s.putIfAbsent("race/create", payload,
+            "application/octet-stream");
+        if (r.won) { wins.fetchAdd((int64) 1); }
+        return;
+    }
+
+    static async void matchRacer(MemoryObjectStore s, AtomicInt64 wins,
+                                 String etag, int32 id) {
+        int8[] payload = heap int8[1];
+        payload[0] = (int8) id;
+        CondResult r = s.putIfMatch("race/match", payload,
+            "application/octet-stream", etag);
+        if (r.won) { wins.fetchAdd((int64) 1); }
+        return;
+    }
+
+    // Exactly ONE of 8 concurrent creators wins; the other 7 lose and
+    // the stored object is the winner's single byte.
+    @Test
+    public void exactlyOneCreateWins() {
+        MemoryObjectStore s = heap MemoryObjectStore();
+        AtomicInt64 wins = heap AtomicInt64((int64) 0);
+        scope {
+            spawn createRacer(s, wins, 1);
+            spawn createRacer(s, wins, 2);
+            spawn createRacer(s, wins, 3);
+            spawn createRacer(s, wins, 4);
+            spawn createRacer(s, wins, 5);
+            spawn createRacer(s, wins, 6);
+            spawn createRacer(s, wins, 7);
+            spawn createRacer(s, wins, 8);
+        }
+        Assert.equals((int64) 1, wins.load());
+        int8[] stored = s.get("race/create");
+        Assert.equals((int64) 1, (int64) stored.count());
+        Assert.isTrue(stored[0] >= (int8) 1 && stored[0] <= (int8) 8);
+    }
+
+    // Exactly ONE of 8 concurrent compare-and-swappers advances each
+    // generation: every fiber holds the SAME starting token, so one
+    // wins and seven observe a mismatch.
+    @Test
+    public void exactlyOneMatchWinsPerGeneration() {
+        MemoryObjectStore s = heap MemoryObjectStore();
+        int8[] seed = heap int8[1];
+        seed[0] = (int8) 0;
+        String start = s.put("race/match", seed,
+            "application/octet-stream");
+        AtomicInt64 wins = heap AtomicInt64((int64) 0);
+        scope {
+            spawn matchRacer(s, wins, start, 1);
+            spawn matchRacer(s, wins, start, 2);
+            spawn matchRacer(s, wins, start, 3);
+            spawn matchRacer(s, wins, start, 4);
+            spawn matchRacer(s, wins, start, 5);
+            spawn matchRacer(s, wins, start, 6);
+            spawn matchRacer(s, wins, start, 7);
+            spawn matchRacer(s, wins, start, 8);
+        }
+        Assert.equals((int64) 1, wins.load());
+        // The winner's token is now current; the start token is stale.
+        CondResult stale = s.putIfMatch("race/match", seed,
+            "application/octet-stream", start);
+        Assert.isFalse(stale.won);
+    }
+
+    static async void putter(MemoryObjectStore s, int32 id) {
+        int8[] payload = heap int8[1];
+        payload[0] = (int8) id;
+        String etag = s.put("raw/" + (int64) id, payload,
+            "application/octet-stream");
+        return;
+    }
+
+    // Read-after-write across fibers: every object written by a joined
+    // fiber is immediately visible (the declared caveat is honest).
+    @Test
+    public void crossFiberReadAfterWrite() {
+        MemoryObjectStore s = heap MemoryObjectStore();
+        scope {
+            spawn putter(s, 1);
+            spawn putter(s, 2);
+            spawn putter(s, 3);
+            spawn putter(s, 4);
+        }
+        int32 i = 1;
+        while (i <= 4) {
+            int8[] b = s.get("raw/" + (int64) i);
+            Assert.equals((int64) i, (int64) b[0]);
+            i = i + 1;
+        }
+        Assert.equals((int64) 4, s.list("raw/", "", "", (int64) 10)
+            .count());
+    }
+}

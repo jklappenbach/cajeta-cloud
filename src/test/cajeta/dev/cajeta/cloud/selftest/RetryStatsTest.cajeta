@@ -1,0 +1,97 @@
+package dev.cajeta.cloud.selftest;
+
+import dev.cajeta.unit.Assert;
+import dev.cajeta.cloud.CloudException;
+import dev.cajeta.cloud.CloudStats;
+import dev.cajeta.cloud.RetryPolicy;
+
+/**
+ * cajeta-cloud U5 — the error/retry/observability layer: only
+ * TRANSIENT failures retry and only while attempts remain (5.1),
+ * backoff is capped exponential with jitter inside [half, full] of the
+ * step (5.2, deterministic under a fixed seed), and stats counters
+ * account for every recorded call including the CAS-raised latency
+ * ceiling (5.3).
+ */
+public class RetryStatsTest {
+
+    public RetryStatsTest() { return; }
+
+    static #CloudException transientErr() {
+        CloudException e = heap CloudException(CloudException.TRANSIENT(),
+            "fake", "op", "k", "throttled");
+        return #e;
+    }
+
+    static #CloudException permanentErr() {
+        CloudException e = heap CloudException(CloudException.NOT_FOUND(),
+            "fake", "op", "k", "missing");
+        return #e;
+    }
+
+    // 5.1 — retry gates on BOTH transience and remaining attempts.
+    @Test
+    public void retryGatesOnKindAndAttempts() {
+        RetryPolicy p = RetryPolicy.standard((uint64) 42);
+        Assert.equals((int64) 4, (int64) p.attempts());
+        CloudException t = RetryStatsTest.transientErr();
+        CloudException n = RetryStatsTest.permanentErr();
+        Assert.isTrue(t.isTransient());
+        Assert.isFalse(n.isTransient());
+        Assert.isTrue(p.shouldRetry(t, 0));
+        Assert.isTrue(p.shouldRetry(t, 2));
+        Assert.isFalse(p.shouldRetry(t, 3));   // attempts exhausted
+        Assert.isFalse(p.shouldRetry(n, 0));   // permanent: never
+    }
+
+    // 5.2 — capped exponential backoff with jitter in [step/2, step]:
+    // attempt k steps at min(base·2^k, max), never above the cap and
+    // never below half the step. Deterministic under a fixed seed.
+    @Test
+    public void backoffIsCappedExponentialWithJitter() {
+        RetryPolicy p = heap RetryPolicy(6, (int64) 100, (int64) 2000,
+            (uint64) 7);
+        int32 k = 0;
+        while (k < 6) {
+            int64 step = 100;
+            int32 j = 0;
+            while (j < k) { step = step * 2; j = j + 1; }
+            if (step > 2000) { step = 2000; }
+            int64 d = p.delayMillis(k);
+            Assert.isTrue(d >= step / 2);
+            Assert.isTrue(d <= step);
+            k = k + 1;
+        }
+        // Same seed → same schedule (delays are reproducible).
+        RetryPolicy p2 = heap RetryPolicy(6, (int64) 100, (int64) 2000,
+            (uint64) 7);
+        RetryPolicy p3 = heap RetryPolicy(6, (int64) 100, (int64) 2000,
+            (uint64) 7);
+        k = 0;
+        while (k < 6) {
+            Assert.equals(p2.delayMillis(k), p3.delayMillis(k));
+            k = k + 1;
+        }
+    }
+
+    // 5.3 — stats: every record lands in the counters; latencyMax is a
+    // high-water mark; retries count separately.
+    @Test
+    public void statsCountersAccount() {
+        CloudStats st = heap CloudStats();
+        st.recordCall((int64) 10, (int64) 100, (int64) 0, false);
+        st.recordCall((int64) 30, (int64) 0, (int64) 500, false);
+        st.recordCall((int64) 20, (int64) 0, (int64) 0, true);
+        st.recordRetry();
+        st.recordRetry();
+        Assert.equals((int64) 3, st.requests());
+        Assert.equals((int64) 1, st.failures());
+        Assert.equals((int64) 2, st.retries());
+        Assert.equals((int64) 100, st.bytesIn());
+        Assert.equals((int64) 500, st.bytesOut());
+        Assert.equals((int64) 60, st.latencyTotal());
+        Assert.equals((int64) 30, st.latencyMax());   // high-water
+        st.recordCall((int64) 5, (int64) 0, (int64) 0, false);
+        Assert.equals((int64) 30, st.latencyMax());   // not lowered
+    }
+}

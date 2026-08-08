@@ -1,0 +1,104 @@
+package dev.cajeta.cloud.selftest;
+
+import dev.cajeta.unit.Assert;
+import dev.cajeta.cloud.Capabilities;
+import dev.cajeta.cloud.Caps;
+import dev.cajeta.cloud.CloudException;
+import dev.cajeta.cloud.object.MemoryObjectStore;
+
+/**
+ * cajeta-cloud U2 — capability negotiation (spec §3): definitive
+ * answers before any operation (2.1), require() fails NAMING the
+ * capability and the adapter (2.2), assertAll lists EVERY missing
+ * capability at startup (2.3), caveats ride along per capability
+ * (2.4), and the memory driver's declarations match what it actually
+ * does (2.5).
+ */
+public class CapabilityTest {
+
+    public CapabilityTest() { return; }
+
+    // 2.1 — supports() answers definitively, both ways.
+    @Test
+    public void supportsAnswersDefinitively() {
+        Capabilities c = heap Capabilities("fake");
+        c.declare(Caps.RANGE_READ(), "");
+        Assert.isTrue(c.supports(Caps.RANGE_READ()));
+        Assert.isFalse(c.supports(Caps.MULTIPART()));
+        Assert.isTrue(c.adapterName().equals("fake"));
+    }
+
+    // 2.2 — require() on a missing capability throws immediately,
+    // naming the capability AND the adapter (§3.2). Never a no-op.
+    @Test
+    public void requireNamesCapabilityAndAdapter() {
+        Capabilities c = heap Capabilities("nocopy");
+        boolean threw = false;
+        try {
+            c.require(Caps.SERVER_SIDE_COPY(), "copy", "a/b");
+        } catch (CloudException e) {
+            threw = true;
+            Assert.equals((int64) CloudException.PROVIDER_ERROR(),
+                (int64) e.kind());
+            Assert.isTrue(e.message.contains("object.server-side-copy"));
+            Assert.isTrue(e.message.contains("nocopy"));
+        }
+        Assert.isTrue(threw);
+        // A declared capability passes silently.
+        c.declare(Caps.RANGE_READ(), "");
+        c.require(Caps.RANGE_READ(), "getRange", "a/b");
+    }
+
+    // 2.3 — assertAll throws ONCE listing ALL missing capabilities, so
+    // a misdeployment reports everything on launch (§3.3).
+    @Test
+    public void assertAllListsEveryMissing() {
+        Capabilities c = heap Capabilities("bare");
+        c.declare(Caps.RANGE_READ(), "");
+        String[] need = heap String[3];
+        need[0] = Caps.RANGE_READ();
+        need[1] = Caps.COND_PUT_CREATE();
+        need[2] = Caps.MULTIPART();
+        boolean threw = false;
+        try {
+            c.assertAll(need);
+        } catch (CloudException e) {
+            threw = true;
+            Assert.isTrue(e.message.contains("object.conditional-put-create"));
+            Assert.isTrue(e.message.contains("object.multipart"));
+            Assert.isFalse(e.message.contains("object.range-read,"));
+        }
+        Assert.isTrue(threw);
+        // All present → passes.
+        String[] ok = heap String[1];
+        ok[0] = Caps.RANGE_READ();
+        c.assertAll(ok);
+    }
+
+    // 2.4 — caveats are retrievable per capability; "" when none.
+    @Test
+    public void caveatsRideAlong() {
+        Capabilities c = heap Capabilities("s3ish");
+        c.declare(Caps.LIST_ORDERED(), "eventual within 1s of a write");
+        Assert.isTrue(c.caveatFor(Caps.LIST_ORDERED())
+            .equals("eventual within 1s of a write"));
+        Assert.isTrue(c.caveatFor(Caps.MULTIPART()).equals(""));
+    }
+
+    // 2.5 — the memory driver declares exactly the granular set it
+    // implements (partial support = granular names, §3.4).
+    @Test
+    public void memoryDriverDeclarations() {
+        MemoryObjectStore s = heap MemoryObjectStore();
+        Capabilities c = s.capabilities();
+        Assert.isTrue(c.supports(Caps.COND_PUT_CREATE()));
+        Assert.isTrue(c.supports(Caps.COND_PUT_OVERWRITE()));
+        Assert.isTrue(c.supports(Caps.SERVER_SIDE_COPY()));
+        Assert.isTrue(c.supports(Caps.LIST_ORDERED()));
+        Assert.isTrue(c.supports(Caps.READ_AFTER_WRITE()));
+        Assert.isTrue(c.supports(Caps.MULTIPART()));
+        Assert.isTrue(c.supports(Caps.RANGE_READ()));
+        Assert.isFalse(c.supports(Caps.RESHARDING()));
+        Assert.isTrue(c.adapterName().equals("memory"));
+    }
+}

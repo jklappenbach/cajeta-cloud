@@ -1,0 +1,22 @@
+package dev.cajeta.cloud.object;
+
+import cajeta.lang.String;
+
+/**
+ * Multipart upload (spec §8): parts may arrive in any order (and, in
+ * adapters, concurrently, bounded by the adapter's configured limit);
+ * {@link #complete} assembles them IN PART-NUMBER ORDER and installs
+ * atomically. A failed or abandoned upload is abortable and NEVER
+ * becomes a readable object (§8.2).
+ */
+public interface MultipartUpload {
+
+    /** Upload part `partNumber` (1-based; re-upload replaces). */
+    void addPart(int32 partNumber, int8[] bytes);
+
+    /** Assemble in part order and install; returns the version token. */
+    #String complete();
+
+    /** Abort: no readable object results (§8.2). */
+    void abort();
+}

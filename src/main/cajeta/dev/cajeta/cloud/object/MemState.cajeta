@@ -1,0 +1,82 @@
+package dev.cajeta.cloud.object;
+
+import cajeta.collection.ArrayList;
+import cajeta.collection.HashMap;
+import cajeta.concurrent.AtomicInt64;
+import cajeta.concurrent.Lock;
+import cajeta.concurrent.LockGuard;
+import cajeta.lang.String;
+import dev.cajeta.cloud.CloudStats;
+
+/**
+ * The memory driver's shared guts, extracted so writers and multipart
+ * uploads can install through it WITHOUT holding a MemoryObjectStore
+ * reference: a back-reference to the interface-implementing class
+ * creates a drop-synthesis cycle (store → vtable → writer → store)
+ * that SIGSEGVs the v0.17.4 compiler. This class references only
+ * stdlib types and Blob, so every drop walk terminates.
+ */
+final class MemState {
+
+    Lock lock;
+    HashMap<String, Blob> blobs;
+    ArrayList<String> sorted;       // sorted key mirror for listing
+    AtomicInt64 seq;
+    CloudStats statsObj;
+
+    MemState() {
+        this.lock = heap Lock();
+        this.blobs = heap HashMap<String, Blob>();
+        this.sorted = heap ArrayList<String>();
+        this.seq = heap AtomicInt64((int64) 0);
+        this.statsObj = heap CloudStats();
+        return;
+    }
+
+    /** Unsigned-bytewise less-than — exactly the §5.4 UTF-8 order. */
+    static boolean less(String a, String b) {
+        return a.compareTo(b) < 0;
+    }
+
+    /** Acquire the lock, install, and account the write. */
+    #String install(String key, int8[] bytes, int64 len,
+                    String contentType) {
+        LockGuard g = this.lock.acquire();
+        String etag = this.installLocked(key, bytes, len, contentType);
+        this.statsObj.recordCall((int64) 0, len, (int64) 0, false);
+        return #etag;
+    }
+
+    /** Install under the held lock; returns the new etag. */
+    #String installLocked(String key, int8[] bytes, int64 len,
+                          String contentType) {
+        int64 s = this.seq.fetchAdd((int64) 1) + 1;
+        String etag = "m" + s;
+        int8[] copy = heap int8[len];
+        int64 i = 0;
+        while (i < len) { copy[i] = bytes[i]; i = i + 1; }
+        String ct = "" + contentType;
+        String etagStore = "" + etag;
+        boolean existed = this.blobs.containsKey(key);
+        String k = "" + key;
+        this.blobs.put(#k, heap Blob(#copy, #ct, s, #etagStore));
+        if (!existed) { this.sortedInsert(key); }
+        return #etag;
+    }
+
+    void sortedInsert(String key) {
+        int32 lo = 0;
+        int32 hi = this.sorted.count();
+        while (lo < hi) {
+            int32 mid = (lo + hi) / 2;
+            if (MemState.less(this.sorted.get(mid), key)) {
+                lo = mid + 1;
+            } else {
+                hi = mid;
+            }
+        }
+        String k = "" + key;
+        this.sorted.insert(lo, #k);
+        return;
+    }
+}

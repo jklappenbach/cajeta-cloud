@@ -1,0 +1,324 @@
+package dev.cajeta.cloud.selftest;
+
+import dev.cajeta.unit.Assert;
+import dev.cajeta.cloud.CloudException;
+import dev.cajeta.cloud.object.CondResult;
+import dev.cajeta.cloud.object.ListPage;
+import dev.cajeta.cloud.object.MemoryObjectStore;
+import dev.cajeta.cloud.object.MultipartUpload;
+import dev.cajeta.cloud.object.ObjectReader;
+import dev.cajeta.cloud.object.ObjectWriter;
+import dev.cajeta.cloud.object.StatResult;
+
+/**
+ * cajeta-cloud U3 — the object store port against the memory driver:
+ * atomic puts with fresh etags (3.1.1), explicit absence (3.1.2),
+ * range reads that transfer ONLY the range (3.1.7/3.1.8), ordered
+ * paginated listing with delimiter grouping (3.1.5/3.1.6), streaming
+ * write atomicity + reader snapshots (3.1.4), multipart assembly
+ * (3.1.9), server-side copy (3.1.3), and conditional writes where
+ * LOSING IS A RESULT, not an exception (3.1.10, 3.1.12).
+ */
+public class ObjectStoreTest {
+
+    public ObjectStoreTest() { return; }
+
+    static #int8[] bytesOf(String s) {
+        return s.toBytes();
+    }
+
+    static #String textOf(int8[] b) {
+        int8[] copy = heap int8[(int64) b.count()];
+        int64 i = 0;
+        while (i < (int64) copy.count()) { copy[i] = b[i]; i = i + 1; }
+        String s = heap String(#copy, (int32) b.count());
+        return #s;
+    }
+
+    // 3.1.1 — put/get roundtrip; overwrite replaces wholesale with a
+    // NEW etag and advancing lastModified.
+    @Test
+    public void putGetRoundtripAndOverwrite() {
+        MemoryObjectStore s = heap MemoryObjectStore();
+        int8[] v1 = ObjectStoreTest.bytesOf("first version");
+        String e1 = s.put("data/a", v1, "text/plain");
+        Assert.isTrue(e1.count() > 0);
+        Assert.isTrue(ObjectStoreTest.textOf(s.get("data/a"))
+            .equals("first version"));
+        StatResult st1 = s.stat("data/a");
+        Assert.isTrue(st1.exists);
+        Assert.equals((int64) 13, st1.size);
+        Assert.isTrue(st1.contentType.equals("text/plain"));
+        Assert.isTrue(st1.etag.equals(e1));
+        int8[] v2 = ObjectStoreTest.bytesOf("second, longer version");
+        String e2 = s.put("data/a", v2, "text/plain");
+        Assert.isFalse(e2.equals(e1));
+        Assert.isTrue(ObjectStoreTest.textOf(s.get("data/a"))
+            .equals("second, longer version"));
+        StatResult st2 = s.stat("data/a");
+        Assert.isTrue(st2.lastModified > st1.lastModified);
+    }
+
+    // 3.1.2 — a missing key is EXPLICIT: get throws NOT_FOUND, stat
+    // answers exists=false, delete returns false.
+    @Test
+    public void absenceIsExplicit() {
+        MemoryObjectStore s = heap MemoryObjectStore();
+        boolean threw = false;
+        try {
+            int8[] never = s.get("no/such");
+        } catch (CloudException e) {
+            threw = true;
+            Assert.equals((int64) CloudException.NOT_FOUND(),
+                (int64) e.kind());
+        }
+        Assert.isTrue(threw);
+        StatResult st = s.stat("no/such");
+        Assert.isFalse(st.exists);
+        Assert.isFalse(s.delete("no/such"));
+        // Delete of a real key returns true, and the key is gone.
+        int8[] v = ObjectStoreTest.bytesOf("x");
+        String e1 = s.put("real", v, "text/plain");
+        Assert.isTrue(s.delete("real"));
+        Assert.isFalse(s.stat("real").exists);
+        Assert.isFalse(s.delete("real"));
+    }
+
+    // 3.1.7 + 3.1.8 — range reads return exactly the slice, clamp at
+    // the end (HTTP semantics), reject an offset past the end — and
+    // TRANSFER only the range: bytesOut grows by the slice length, not
+    // the object size.
+    @Test
+    public void rangeReadsTransferOnlyTheRange() {
+        MemoryObjectStore s = heap MemoryObjectStore();
+        int8[] v = ObjectStoreTest.bytesOf("0123456789");
+        String e1 = s.put("r", v, "text/plain");
+        int64 outBefore = s.stats().bytesOut();
+        Assert.isTrue(ObjectStoreTest.textOf(
+            s.getRange("r", (int64) 2, (int64) 3)).equals("234"));
+        int64 outAfter = s.stats().bytesOut();
+        Assert.equals((int64) 3, outAfter - outBefore);   // 3.1.8
+        // Clamp: a range running past the end returns the tail.
+        Assert.isTrue(ObjectStoreTest.textOf(
+            s.getRange("r", (int64) 7, (int64) 100)).equals("789"));
+        // Offset at/past the end is unsatisfiable.
+        boolean threw = false;
+        try {
+            int8[] never = s.getRange("r", (int64) 10, (int64) 1);
+        } catch (CloudException e) {
+            threw = true;
+        }
+        Assert.isTrue(threw);
+        // Missing key → NOT_FOUND, same as get.
+        threw = false;
+        try {
+            int8[] never2 = s.getRange("gone", (int64) 0, (int64) 1);
+        } catch (CloudException e) {
+            threw = true;
+            Assert.equals((int64) CloudException.NOT_FOUND(),
+                (int64) e.kind());
+        }
+        Assert.isTrue(threw);
+    }
+
+    // 3.1.5 — listing: lexicographic (declared in-band), prefix
+    // filtered, paginated by continuation token with a stable order
+    // across pages.
+    @Test
+    public void listingOrderedAndPaginated() {
+        MemoryObjectStore s = heap MemoryObjectStore();
+        // Insert in scrambled order; listing must sort.
+        int8[] v = ObjectStoreTest.bytesOf("x");
+        String e1 = s.put("logs/c", v, "t");
+        String e2 = s.put("logs/a", v, "t");
+        String e3 = s.put("data/z", v, "t");
+        String e4 = s.put("logs/b", v, "t");
+        String e5 = s.put("logs/d", v, "t");
+        ListPage p1 = s.list("logs/", "", "", (int64) 2);
+        Assert.isTrue(p1.ordered);
+        Assert.equals((int64) 2, p1.count());
+        Assert.isTrue(p1.keyAt((int64) 0).equals("logs/a"));
+        Assert.isTrue(p1.keyAt((int64) 1).equals("logs/b"));
+        Assert.isTrue(p1.nextToken().count() > 0);
+        ListPage p2 = s.list("logs/", "", p1.nextToken(), (int64) 2);
+        Assert.equals((int64) 2, p2.count());
+        Assert.isTrue(p2.keyAt((int64) 0).equals("logs/c"));
+        Assert.isTrue(p2.keyAt((int64) 1).equals("logs/d"));
+        // "" token = END of listing (§5.2) — the caller stops here.
+        Assert.equals((int64) 0, p2.nextToken().count());
+        // Metadata rides along with each key.
+        Assert.equals((int64) 1, p1.sizeAt((int64) 0));
+        Assert.isTrue(p1.etagAt((int64) 0).equals("m2"));
+    }
+
+    // 3.1.6 — delimiter grouping: keys under a nested "directory"
+    // collapse into ONE common prefix; direct children list plainly.
+    @Test
+    public void delimiterGroupsCommonPrefixes() {
+        MemoryObjectStore s = heap MemoryObjectStore();
+        int8[] v = ObjectStoreTest.bytesOf("x");
+        String e1 = s.put("a/one", v, "t");
+        String e2 = s.put("a/sub/deep1", v, "t");
+        String e3 = s.put("a/sub/deep2", v, "t");
+        String e4 = s.put("a/two", v, "t");
+        String e5 = s.put("a/zub/deep", v, "t");
+        ListPage p = s.list("a/", "/", "", (int64) 100);
+        Assert.equals((int64) 2, p.count());
+        Assert.isTrue(p.keyAt((int64) 0).equals("a/one"));
+        Assert.isTrue(p.keyAt((int64) 1).equals("a/two"));
+        Assert.equals((int64) 2, p.prefixCount());
+        Assert.isTrue(p.prefixAt((int64) 0).equals("a/sub/"));
+        Assert.isTrue(p.prefixAt((int64) 1).equals("a/zub/"));
+    }
+
+    // 3.1.4 — streaming write: NOTHING visible until complete(); the
+    // install is whole-or-nothing; abort leaves no trace. And the
+    // reader is a SNAPSHOT: an overwrite during a read never tears it.
+    @Test
+    public void streamingWriteAtomicAndReaderSnapshots() {
+        MemoryObjectStore s = heap MemoryObjectStore();
+        ObjectWriter w = s.openWrite("big", "application/octet-stream");
+        int8[] c1 = ObjectStoreTest.bytesOf("hello ");
+        int8[] c2 = ObjectStoreTest.bytesOf("streaming ");
+        int8[] c3 = ObjectStoreTest.bytesOf("world");
+        w.write(c1, (int64) c1.count());
+        w.write(c2, (int64) c2.count());
+        Assert.isFalse(s.stat("big").exists);          // not yet visible
+        w.write(c3, (int64) c3.count());
+        String etag = w.complete();
+        Assert.isTrue(ObjectStoreTest.textOf(s.get("big"))
+            .equals("hello streaming world"));
+        Assert.isTrue(s.stat("big").etag.equals(etag));
+        // Abort: accumulated chunks vanish.
+        ObjectWriter w2 = s.openWrite("aborted", "t");
+        w2.write(c1, (int64) c1.count());
+        w2.abort();
+        Assert.isFalse(s.stat("aborted").exists);
+        // Snapshot read across an overwrite.
+        ObjectReader r = s.openRead("big");
+        Assert.equals((int64) 21, r.size());
+        int8[] over = ObjectStoreTest.bytesOf("REPLACED");
+        String e2 = s.put("big", over, "t");
+        int8[] buf = heap int8[8];
+        int8[] all = heap int8[64];
+        int64 at = 0;
+        int64 got = r.read(buf, (int64) 8);
+        while (got >= 0) {
+            int64 i = 0;
+            while (i < got) { all[at + i] = buf[i]; i = i + 1; }
+            at = at + got;
+            got = r.read(buf, (int64) 8);
+        }
+        r.close();
+        Assert.equals((int64) 21, at);
+        int8[] seen = heap int8[at];
+        int64 j = 0;
+        while (j < at) { seen[j] = all[j]; j = j + 1; }
+        Assert.isTrue(ObjectStoreTest.textOf(seen)
+            .equals("hello streaming world"));
+        // The store itself now serves the overwrite.
+        Assert.isTrue(ObjectStoreTest.textOf(s.get("big"))
+            .equals("REPLACED"));
+    }
+
+    // 3.1.9 — multipart: parts land out of order, re-upload replaces,
+    // complete() assembles in part-number order; incomplete uploads
+    // are NEVER readable; abort is forever.
+    @Test
+    public void multipartAssemblesInPartOrder() {
+        MemoryObjectStore s = heap MemoryObjectStore();
+        MultipartUpload up = s.beginMultipart("mp", "t");
+        int8[] p3 = ObjectStoreTest.bytesOf("gamma");
+        int8[] p1 = ObjectStoreTest.bytesOf("alpha-");
+        int8[] p2 = ObjectStoreTest.bytesOf("WRONG");
+        up.addPart(3, p3);
+        up.addPart(1, p1);
+        up.addPart(2, p2);
+        Assert.isFalse(s.stat("mp").exists);           // §8.2
+        int8[] p2b = ObjectStoreTest.bytesOf("beta-");
+        up.addPart(2, p2b);                            // replace
+        String etag = up.complete();
+        Assert.isTrue(ObjectStoreTest.textOf(s.get("mp"))
+            .equals("alpha-beta-gamma"));
+        Assert.isTrue(s.stat("mp").etag.equals(etag));
+        // Abort: nothing ever appears.
+        MultipartUpload up2 = s.beginMultipart("mp2", "t");
+        up2.addPart(1, p1);
+        up2.abort();
+        Assert.isFalse(s.stat("mp2").exists);
+        boolean threw = false;
+        try {
+            up2.addPart(2, p2b);                       // closed
+        } catch (CloudException e) {
+            threw = true;
+        }
+        Assert.isTrue(threw);
+        // Zero-part completion is an error, not an empty object.
+        MultipartUpload up3 = s.beginMultipart("mp3", "t");
+        threw = false;
+        try {
+            String never = up3.complete();
+        } catch (CloudException e) {
+            threw = true;
+        }
+        Assert.isTrue(threw);
+        Assert.isFalse(s.stat("mp3").exists);
+    }
+
+    // 3.1.3 — server-side copy duplicates bytes and content type under
+    // a fresh etag; the source is untouched.
+    @Test
+    public void serverSideCopy() {
+        MemoryObjectStore s = heap MemoryObjectStore();
+        int8[] v = ObjectStoreTest.bytesOf("payload");
+        String e1 = s.put("src", v, "text/plain");
+        String e2 = s.copy("src", "dst");
+        Assert.isFalse(e2.equals(e1));
+        Assert.isTrue(ObjectStoreTest.textOf(s.get("dst"))
+            .equals("payload"));
+        Assert.isTrue(s.stat("dst").contentType.equals("text/plain"));
+        Assert.isTrue(ObjectStoreTest.textOf(s.get("src"))
+            .equals("payload"));
+        boolean threw = false;
+        try {
+            String never = s.copy("missing", "dst2");
+        } catch (CloudException e) {
+            threw = true;
+            Assert.equals((int64) CloudException.NOT_FOUND(),
+                (int64) e.kind());
+        }
+        Assert.isTrue(threw);
+    }
+
+    // 3.1.10 + 3.1.12 — conditional writes: losing is a RESULT carrying
+    // the current token, and the driver genuinely loses when it must
+    // (an always-win driver would pass every race test vacuously).
+    @Test
+    public void conditionalWritesLoseHonestly() {
+        MemoryObjectStore s = heap MemoryObjectStore();
+        int8[] a = ObjectStoreTest.bytesOf("A");
+        int8[] b = ObjectStoreTest.bytesOf("B");
+        CondResult w1 = s.putIfAbsent("k", a, "t");
+        Assert.isTrue(w1.won);
+        // 3.1.12: the second creator MUST lose, and learns the
+        // winner's token — exactly what it needs to re-read.
+        CondResult l1 = s.putIfAbsent("k", b, "t");
+        Assert.isFalse(l1.won);
+        Assert.isTrue(l1.etag.equals(w1.etag));
+        Assert.isTrue(ObjectStoreTest.textOf(s.get("k")).equals("A"));
+        // putIfMatch with the CURRENT token wins and rotates the etag.
+        CondResult w2 = s.putIfMatch("k", b, "t", w1.etag);
+        Assert.isTrue(w2.won);
+        Assert.isFalse(w2.etag.equals(w1.etag));
+        Assert.isTrue(ObjectStoreTest.textOf(s.get("k")).equals("B"));
+        // A STALE token loses and reports the current one.
+        CondResult l2 = s.putIfMatch("k", a, "t", w1.etag);
+        Assert.isFalse(l2.won);
+        Assert.isTrue(l2.etag.equals(w2.etag));
+        Assert.isTrue(ObjectStoreTest.textOf(s.get("k")).equals("B"));
+        // putIfMatch against an ABSENT key is a mismatch, not a crash.
+        CondResult l3 = s.putIfMatch("nope", a, "t", w1.etag);
+        Assert.isFalse(l3.won);
+        Assert.equals((int64) 0, (int64) l3.etag.count());
+    }
+}
