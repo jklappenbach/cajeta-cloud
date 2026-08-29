@@ -20,7 +20,7 @@ public class ErrorShapeTest {
         MemoryObjectStore s = heap MemoryObjectStore();
         boolean threw = false;
         try {
-            int8[] never = s.get("bucket/missing-object");
+            int8[] never #= s.get("bucket/missing-object");
         } catch (CloudException e) {
             threw = true;
             Assert.isTrue(e.message.contains("memory"));
@@ -43,7 +43,7 @@ public class ErrorShapeTest {
     public void credentialsNeverAppearInMessages() {
         Credentials creds = heap Credentials("AKIAIOSFODNN7EXAMPLE",
             "wJalrXUtnFEMI/K7MDENG/bPxRfiCY");
-        String rendered = creds.redacted();
+        String rendered #= creds.redacted();
         Assert.isTrue(rendered.equals("AKIA…[redacted]"));
         // The failure path an adapter would actually take.
         CloudException e = heap CloudException(

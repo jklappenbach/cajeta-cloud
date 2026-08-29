@@ -19,7 +19,7 @@ final class MemoryWriter implements ObjectWriter {
 
     MemoryWriter(MemState st, String key,
                  String contentType) {
-        this.st = st;
+        this.st #= st;
         this.key = "" + key;
         this.contentType = "" + contentType;
         this.buf #= heap int8[256];

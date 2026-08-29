@@ -41,8 +41,8 @@ final class MemState {
     /** Acquire the lock, install, and account the write. */
     #String install(String key, int8[] bytes, int64 len,
                     String contentType) {
-        LockGuard g = this.lock.acquire();
-        String etag = this.installLocked(key, bytes, len, contentType);
+        LockGuard g #= this.lock.acquire();
+        String etag #= this.installLocked(key, bytes, len, contentType);
         this.statsObj.recordCall((int64) 0, len, (int64) 0, false);
         return #etag;
     }

@@ -66,28 +66,28 @@ public final class ObjectStoreContract {
     }
 
     static void roundtripAndAbsence(ObjectStore s, String prefix) {
-        int8[] v1 = ObjectStoreContract.bytesOf("contract-v1");
-        String e1 = s.put(prefix + "rt", v1, "text/plain");
+        int8[] v1 #= ObjectStoreContract.bytesOf("contract-v1");
+        String e1 #= s.put(prefix + "rt", v1, "text/plain");
         ObjectStoreContract.check(e1.count() > 0, "put-etag",
             "put must return a non-empty version token");
         ObjectStoreContract.check(
             ObjectStoreContract.textOf(s.get(prefix + "rt"))
                 .equals("contract-v1"),
             "roundtrip", "get must return the exact bytes put");
-        StatResult st = s.stat(prefix + "rt");
+        StatResult st #= s.stat(prefix + "rt");
         ObjectStoreContract.check(st.exists && st.size == 11,
             "stat", "stat must report existence and size");
         ObjectStoreContract.check(st.etag.equals(e1),
             "stat-etag", "stat must carry the current version token");
         // Overwrite rotates the token.
-        int8[] v2 = ObjectStoreContract.bytesOf("contract-v2!");
-        String e2 = s.put(prefix + "rt", v2, "text/plain");
+        int8[] v2 #= ObjectStoreContract.bytesOf("contract-v2!");
+        String e2 #= s.put(prefix + "rt", v2, "text/plain");
         ObjectStoreContract.check(!e2.equals(e1), "etag-rotates",
             "an overwrite must produce a NEW version token");
         // Absence is explicit.
         boolean threw = false;
         try {
-            int8[] never = s.get(prefix + "absent");
+            int8[] never #= s.get(prefix + "absent");
         } catch (CloudException e) {
             threw = e.kind() == CloudException.NOT_FOUND();
         }
@@ -108,11 +108,11 @@ public final class ObjectStoreContract {
         Capabilities caps = s.capabilities();
         if (!caps.supports(Caps.RANGE_READ())) {
             // Undeclared → must fail cleanly per §3.2, never truncate.
-            String e0 = s.put(prefix + "rg",
+            String e0 #= s.put(prefix + "rg",
                 ObjectStoreContract.bytesOf("0123456789"), "t");
             boolean threw = false;
             try {
-                int8[] never = s.getRange(prefix + "rg", (int64) 0,
+                int8[] never #= s.getRange(prefix + "rg", (int64) 0,
                     (int64) 4);
             } catch (CloudException e) {
                 threw = true;
@@ -121,8 +121,8 @@ public final class ObjectStoreContract {
                 "getRange without the capability must fail, not degrade");
             return;
         }
-        int8[] v = ObjectStoreContract.bytesOf("0123456789");
-        String e1 = s.put(prefix + "rg", v, "t");
+        int8[] v #= ObjectStoreContract.bytesOf("0123456789");
+        String e1 #= s.put(prefix + "rg", v, "t");
         ObjectStoreContract.check(
             ObjectStoreContract.textOf(
                 s.getRange(prefix + "rg", (int64) 3, (int64) 4))
@@ -135,7 +135,7 @@ public final class ObjectStoreContract {
             "range-clamp", "a range past the end must clamp, not fail");
         boolean threw = false;
         try {
-            int8[] never = s.getRange(prefix + "rg", (int64) 10,
+            int8[] never #= s.getRange(prefix + "rg", (int64) 10,
                 (int64) 1);
         } catch (CloudException e) {
             threw = true;
@@ -146,11 +146,11 @@ public final class ObjectStoreContract {
     }
 
     static void listing(ObjectStore s, String prefix) {
-        int8[] v = ObjectStoreContract.bytesOf("x");
-        String e1 = s.put(prefix + "list/b", v, "t");
-        String e2 = s.put(prefix + "list/a", v, "t");
-        String e3 = s.put(prefix + "list/sub/deep", v, "t");
-        String e4 = s.put(prefix + "list/c", v, "t");
+        int8[] v #= ObjectStoreContract.bytesOf("x");
+        String e1 #= s.put(prefix + "list/b", v, "t");
+        String e2 #= s.put(prefix + "list/a", v, "t");
+        String e3 #= s.put(prefix + "list/sub/deep", v, "t");
+        String e4 #= s.put(prefix + "list/c", v, "t");
         // Paginate at 2; collect everything.
         int64 seen = 0;
         String token = "";
@@ -158,10 +158,10 @@ public final class ObjectStoreContract {
         String prev = "";
         boolean orderedHeld = true;
         while (more) {
-            ListPage p = s.list(prefix + "list/", "", token, (int64) 2);
+            ListPage p #= s.list(prefix + "list/", "", token, (int64) 2);
             int64 i = 0;
             while (i < p.count()) {
-                String k = p.keyAt(i);
+                String k #= p.keyAt(i);
                 if (prev.count() > 0 && prev.compareTo(k) >= 0) {
                     orderedHeld = false;
                 }
@@ -169,7 +169,7 @@ public final class ObjectStoreContract {
                 seen = seen + 1;
                 i = i + 1;
             }
-            token = p.nextToken();
+            token #= p.nextToken();
             more = token.count() > 0;
             // §10.5: the ORDERED guarantee is tested only where
             // declared in-band.
@@ -186,7 +186,7 @@ public final class ObjectStoreContract {
                 "declared lexicographic order must actually hold");
         }
         // Delimiter grouping.
-        ListPage d = s.list(prefix + "list/", "/", "", (int64) 100);
+        ListPage d #= s.list(prefix + "list/", "/", "", (int64) 100);
         ObjectStoreContract.check(d.count() == 3
             && d.prefixCount() == 1, "list-delimiter",
             "a delimiter must group nested keys into common prefixes");
@@ -194,25 +194,25 @@ public final class ObjectStoreContract {
     }
 
     static void streaming(ObjectStore s, String prefix) {
-        ObjectWriter w = s.openWrite(prefix + "stream", "t");
-        int8[] c1 = ObjectStoreContract.bytesOf("chunk-one|");
-        int8[] c2 = ObjectStoreContract.bytesOf("chunk-two");
+        ObjectWriter w #= s.openWrite(prefix + "stream", "t");
+        int8[] c1 #= ObjectStoreContract.bytesOf("chunk-one|");
+        int8[] c2 #= ObjectStoreContract.bytesOf("chunk-two");
         w.write(c1, (int64) c1.count());
         ObjectStoreContract.check(!s.stat(prefix + "stream").exists,
             "write-atomic", "no partial object may be visible mid-write");
         w.write(c2, (int64) c2.count());
-        String etag = w.complete();
+        String etag #= w.complete();
         ObjectStoreContract.check(
             ObjectStoreContract.textOf(s.get(prefix + "stream"))
                 .equals("chunk-one|chunk-two"),
             "write-assembles", "complete() must install every chunk");
-        ObjectWriter w2 = s.openWrite(prefix + "aborted", "t");
+        ObjectWriter w2 #= s.openWrite(prefix + "aborted", "t");
         w2.write(c1, (int64) c1.count());
         w2.abort();
         ObjectStoreContract.check(!s.stat(prefix + "aborted").exists,
             "write-abort", "an aborted write must leave nothing");
         // Streaming read returns the full object.
-        ObjectReader r = s.openRead(prefix + "stream");
+        ObjectReader r #= s.openRead(prefix + "stream");
         int8[] buf = heap int8[7];
         int64 total = 0;
         int64 got = r.read(buf, (int64) 7);
@@ -231,7 +231,7 @@ public final class ObjectStoreContract {
         if (!caps.supports(Caps.MULTIPART())) {
             boolean threw = false;
             try {
-                MultipartUpload never = s.beginMultipart(
+                MultipartUpload never #= s.beginMultipart(
                     prefix + "mp", "t");
             } catch (CloudException e) {
                 threw = true;
@@ -240,20 +240,20 @@ public final class ObjectStoreContract {
                 "beginMultipart without the capability must fail cleanly");
             return;
         }
-        MultipartUpload up = s.beginMultipart(prefix + "mp", "t");
-        int8[] p2 = ObjectStoreContract.bytesOf("-beta");
-        int8[] p1 = ObjectStoreContract.bytesOf("alpha");
+        MultipartUpload up #= s.beginMultipart(prefix + "mp", "t");
+        int8[] p2 #= ObjectStoreContract.bytesOf("-beta");
+        int8[] p1 #= ObjectStoreContract.bytesOf("alpha");
         up.addPart(2, p2);
         up.addPart(1, p1);
         ObjectStoreContract.check(!s.stat(prefix + "mp").exists,
             "multipart-invisible",
             "an incomplete upload must never be readable (§8.2)");
-        String etag = up.complete();
+        String etag #= up.complete();
         ObjectStoreContract.check(
             ObjectStoreContract.textOf(s.get(prefix + "mp"))
                 .equals("alpha-beta"),
             "multipart-order", "parts must assemble in part-number order");
-        MultipartUpload up2 = s.beginMultipart(prefix + "mp2", "t");
+        MultipartUpload up2 #= s.beginMultipart(prefix + "mp2", "t");
         up2.addPart(1, p1);
         up2.abort();
         ObjectStoreContract.check(!s.stat(prefix + "mp2").exists,
@@ -262,12 +262,12 @@ public final class ObjectStoreContract {
     }
 
     static void serverCopy(ObjectStore s, String prefix) {
-        int8[] v = ObjectStoreContract.bytesOf("copy-me");
-        String e1 = s.put(prefix + "cp-src", v, "text/plain");
+        int8[] v #= ObjectStoreContract.bytesOf("copy-me");
+        String e1 #= s.put(prefix + "cp-src", v, "text/plain");
         if (!s.capabilities().supports(Caps.SERVER_SIDE_COPY())) {
             boolean threw = false;
             try {
-                String never = s.copy(prefix + "cp-src",
+                String never #= s.copy(prefix + "cp-src",
                     prefix + "cp-dst");
             } catch (CloudException e) {
                 threw = true;
@@ -276,7 +276,7 @@ public final class ObjectStoreContract {
                 "copy without the capability must fail naming it (§3.2)");
             return;
         }
-        String e2 = s.copy(prefix + "cp-src", prefix + "cp-dst");
+        String e2 #= s.copy(prefix + "cp-src", prefix + "cp-dst");
         ObjectStoreContract.check(
             ObjectStoreContract.textOf(s.get(prefix + "cp-dst"))
                 .equals("copy-me"),
@@ -286,13 +286,13 @@ public final class ObjectStoreContract {
 
     static void conditional(ObjectStore s, String prefix) {
         Capabilities caps = s.capabilities();
-        int8[] a = ObjectStoreContract.bytesOf("A");
-        int8[] b = ObjectStoreContract.bytesOf("B");
+        int8[] a #= ObjectStoreContract.bytesOf("A");
+        int8[] b #= ObjectStoreContract.bytesOf("B");
         if (caps.supports(Caps.COND_PUT_CREATE())) {
-            CondResult w1 = s.putIfAbsent(prefix + "cond", a, "t");
+            CondResult w1 #= s.putIfAbsent(prefix + "cond", a, "t");
             ObjectStoreContract.check(w1.won, "cond-create-wins",
                 "the first creator must win");
-            CondResult l1 = s.putIfAbsent(prefix + "cond", b, "t");
+            CondResult l1 #= s.putIfAbsent(prefix + "cond", b, "t");
             ObjectStoreContract.check(!l1.won, "cond-must-lose",
                 "the SECOND creator must lose — an always-winning "
                 + "driver makes every concurrency test lie (§14.4)");
@@ -306,7 +306,7 @@ public final class ObjectStoreContract {
         } else {
             boolean threw = false;
             try {
-                CondResult never = s.putIfAbsent(prefix + "cond", a,
+                CondResult never #= s.putIfAbsent(prefix + "cond", a,
                     "t");
             } catch (CloudException e) {
                 threw = true;
@@ -315,19 +315,19 @@ public final class ObjectStoreContract {
                 "putIfAbsent without the capability must fail cleanly");
         }
         if (caps.supports(Caps.COND_PUT_OVERWRITE())) {
-            String cur = s.put(prefix + "cas", a, "t");
-            CondResult w2 = s.putIfMatch(prefix + "cas", b, "t", cur);
+            String cur #= s.put(prefix + "cas", a, "t");
+            CondResult w2 #= s.putIfMatch(prefix + "cas", b, "t", cur);
             ObjectStoreContract.check(w2.won, "cas-current-wins",
                 "a putIfMatch holding the current token must win");
-            CondResult l2 = s.putIfMatch(prefix + "cas", a, "t", cur);
+            CondResult l2 #= s.putIfMatch(prefix + "cas", a, "t", cur);
             ObjectStoreContract.check(!l2.won && l2.etag.equals(w2.etag),
                 "cas-stale-loses",
                 "a STALE token must lose and report the current one");
         } else {
-            String cur2 = s.put(prefix + "cas", a, "t");
+            String cur2 #= s.put(prefix + "cas", a, "t");
             boolean threw = false;
             try {
-                CondResult never = s.putIfMatch(prefix + "cas", b, "t",
+                CondResult never #= s.putIfMatch(prefix + "cas", b, "t",
                     cur2);
             } catch (CloudException e) {
                 threw = true;
@@ -342,7 +342,7 @@ public final class ObjectStoreContract {
                             String key, int32 id) {
         int8[] payload = heap int8[1];
         payload[0] = (int8) id;
-        CondResult r = s.putIfAbsent(key, payload,
+        CondResult r #= s.putIfAbsent(key, payload,
             "application/octet-stream");
         if (r.won) { wins.fetchAdd((int64) 1); }
         return;

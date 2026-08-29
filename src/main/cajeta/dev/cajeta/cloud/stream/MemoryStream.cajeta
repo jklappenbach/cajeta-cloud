@@ -28,7 +28,7 @@ public final class MemoryStream implements EventStream {
                 "memory-stream", "MemoryStream", "-",
                 "need at least one sub-stream");
         }
-        this.st = heap StreamState();
+        this.st #= heap StreamState();
         int32 i = 0;
         while (i < initialSubStreams) {
             String id = "s" + (int64) i;
@@ -48,7 +48,7 @@ public final class MemoryStream implements EventStream {
     public CloudStats stats() { return this.st.statsObj; }
 
     public #String[] subStreamIds() {
-        LockGuard g = this.st.lock.acquire();
+        LockGuard g #= this.st.lock.acquire();
         int32 open = 0;
         int32 i = 0;
         while (i < this.st.subs.count()) {
@@ -60,7 +60,7 @@ public final class MemoryStream implements EventStream {
         i = 0;
         while (i < this.st.subs.count()) {
             if (this.st.subs.get(i).open) {
-                out[at] = "" + this.st.subs.get(i).id;
+                out[at] #= "" + this.st.subs.get(i).id;
                 at = at + 1;
             }
             i = i + 1;
@@ -69,13 +69,13 @@ public final class MemoryStream implements EventStream {
     }
 
     public #SubStreamInfo describe(String subStream) {
-        LockGuard g = this.st.lock.acquire();
+        LockGuard g #= this.st.lock.acquire();
         Sub sub = this.st.subOrThrow(subStream, "describe");
         int32 ns = sub.successors.count();
         String[] succ = heap String[(int64) ns];
         int32 i = 0;
         while (i < ns) {
-            succ[i] = "" + sub.successors.get(i);
+            succ[i] #= "" + sub.successors.get(i);
             i = i + 1;
         }
         String id = "" + sub.id;
@@ -84,7 +84,7 @@ public final class MemoryStream implements EventStream {
     }
 
     public #String publish(int8[] payload, String key) {
-        LockGuard g = this.st.lock.acquire();
+        LockGuard g #= this.st.lock.acquire();
         // Route among OPEN sub-streams: stable by key hash, else
         // round-robin off the sequence.
         int32 open = 0;
@@ -124,7 +124,7 @@ public final class MemoryStream implements EventStream {
         }
         int64 ts = this.st.seq.fetchAdd((int64) 1) + 1;
         int64 idx = (int64) target.events.count();
-        String pos = StreamState.token(target.id, idx);
+        String pos #= StreamState.token(target.id, idx);
         int64 n = (int64) payload.count();
         int8[] copy = heap int8[n];
         int64 b = 0;
@@ -137,7 +137,7 @@ public final class MemoryStream implements EventStream {
     }
 
     public #StreamCursor openCursor(String subStream, StartAt start) {
-        LockGuard g = this.st.lock.acquire();
+        LockGuard g #= this.st.lock.acquire();
         Sub sub = this.st.subOrThrow(subStream, "openCursor");
         int64 at = 0;
         if (start.kind == StartAt.OLDEST()) {
@@ -175,7 +175,7 @@ public final class MemoryStream implements EventStream {
      * stay drainable; new keyed publishes route only to open subs.
      */
     public void split(String subStream) {
-        LockGuard g = this.st.lock.acquire();
+        LockGuard g #= this.st.lock.acquire();
         Sub sub = this.st.subOrThrow(subStream, "split");
         if (!sub.open) {
             throw heap CloudException(CloudException.PRECONDITION_FAILED(),
@@ -194,7 +194,7 @@ public final class MemoryStream implements EventStream {
 
     /** Test hook (§12.5.4): the next `count` reads rate-limit. */
     public void induceRateLimit(int32 count) {
-        LockGuard g = this.st.lock.acquire();
+        LockGuard g #= this.st.lock.acquire();
         this.st.throttleOnce = count;
         return;
     }

@@ -19,7 +19,7 @@ final class MemoryCursor implements StreamCursor {
     int64 idx;
 
     MemoryCursor(StreamState st, String subId, int64 idx) {
-        this.st = st;
+        this.st #= st;
         this.subId = "" + subId;
         this.idx = idx;
         return;
@@ -31,7 +31,7 @@ final class MemoryCursor implements StreamCursor {
                 "memory-stream", "next", this.subId,
                 "maxEvents must be >= 1");
         }
-        LockGuard g = this.st.lock.acquire();
+        LockGuard g #= this.st.lock.acquire();
         if (this.st.throttleOnce > 0) {
             // §12.5.4: a rate limit is TRANSIENT, with retry guidance.
             this.st.throttleOnce = this.st.throttleOnce - 1;
@@ -61,7 +61,7 @@ final class MemoryCursor implements StreamCursor {
             taken = taken + 1;
         }
         boolean drained = !sub.open && this.idx >= total;
-        String nextTok = StreamState.token(this.subId, this.idx);
+        String nextTok #= StreamState.token(this.subId, this.idx);
         this.st.statsObj.recordCall((int64) 0, (int64) 0, bytesOut,
                                     false);
         Batch batch = heap Batch(#out, #nextTok, drained);

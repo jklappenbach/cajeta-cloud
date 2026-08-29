@@ -40,22 +40,22 @@ public class ObjectStoreTest {
     @Test
     public void putGetRoundtripAndOverwrite() {
         MemoryObjectStore s = heap MemoryObjectStore();
-        int8[] v1 = ObjectStoreTest.bytesOf("first version");
-        String e1 = s.put("data/a", v1, "text/plain");
+        int8[] v1 #= ObjectStoreTest.bytesOf("first version");
+        String e1 #= s.put("data/a", v1, "text/plain");
         Assert.isTrue(e1.count() > 0);
         Assert.isTrue(ObjectStoreTest.textOf(s.get("data/a"))
             .equals("first version"));
-        StatResult st1 = s.stat("data/a");
+        StatResult st1 #= s.stat("data/a");
         Assert.isTrue(st1.exists);
         Assert.equals((int64) 13, st1.size);
         Assert.isTrue(st1.contentType.equals("text/plain"));
         Assert.isTrue(st1.etag.equals(e1));
-        int8[] v2 = ObjectStoreTest.bytesOf("second, longer version");
-        String e2 = s.put("data/a", v2, "text/plain");
+        int8[] v2 #= ObjectStoreTest.bytesOf("second, longer version");
+        String e2 #= s.put("data/a", v2, "text/plain");
         Assert.isFalse(e2.equals(e1));
         Assert.isTrue(ObjectStoreTest.textOf(s.get("data/a"))
             .equals("second, longer version"));
-        StatResult st2 = s.stat("data/a");
+        StatResult st2 #= s.stat("data/a");
         Assert.isTrue(st2.lastModified > st1.lastModified);
     }
 
@@ -66,19 +66,19 @@ public class ObjectStoreTest {
         MemoryObjectStore s = heap MemoryObjectStore();
         boolean threw = false;
         try {
-            int8[] never = s.get("no/such");
+            int8[] never #= s.get("no/such");
         } catch (CloudException e) {
             threw = true;
             Assert.equals((int64) CloudException.NOT_FOUND(),
                 (int64) e.kind());
         }
         Assert.isTrue(threw);
-        StatResult st = s.stat("no/such");
+        StatResult st #= s.stat("no/such");
         Assert.isFalse(st.exists);
         Assert.isFalse(s.delete("no/such"));
         // Delete of a real key returns true, and the key is gone.
-        int8[] v = ObjectStoreTest.bytesOf("x");
-        String e1 = s.put("real", v, "text/plain");
+        int8[] v #= ObjectStoreTest.bytesOf("x");
+        String e1 #= s.put("real", v, "text/plain");
         Assert.isTrue(s.delete("real"));
         Assert.isFalse(s.stat("real").exists);
         Assert.isFalse(s.delete("real"));
@@ -91,8 +91,8 @@ public class ObjectStoreTest {
     @Test
     public void rangeReadsTransferOnlyTheRange() {
         MemoryObjectStore s = heap MemoryObjectStore();
-        int8[] v = ObjectStoreTest.bytesOf("0123456789");
-        String e1 = s.put("r", v, "text/plain");
+        int8[] v #= ObjectStoreTest.bytesOf("0123456789");
+        String e1 #= s.put("r", v, "text/plain");
         int64 outBefore = s.stats().bytesOut();
         Assert.isTrue(ObjectStoreTest.textOf(
             s.getRange("r", (int64) 2, (int64) 3)).equals("234"));
@@ -104,7 +104,7 @@ public class ObjectStoreTest {
         // Offset at/past the end is unsatisfiable.
         boolean threw = false;
         try {
-            int8[] never = s.getRange("r", (int64) 10, (int64) 1);
+            int8[] never #= s.getRange("r", (int64) 10, (int64) 1);
         } catch (CloudException e) {
             threw = true;
         }
@@ -112,7 +112,7 @@ public class ObjectStoreTest {
         // Missing key → NOT_FOUND, same as get.
         threw = false;
         try {
-            int8[] never2 = s.getRange("gone", (int64) 0, (int64) 1);
+            int8[] never2 #= s.getRange("gone", (int64) 0, (int64) 1);
         } catch (CloudException e) {
             threw = true;
             Assert.equals((int64) CloudException.NOT_FOUND(),
@@ -128,19 +128,19 @@ public class ObjectStoreTest {
     public void listingOrderedAndPaginated() {
         MemoryObjectStore s = heap MemoryObjectStore();
         // Insert in scrambled order; listing must sort.
-        int8[] v = ObjectStoreTest.bytesOf("x");
-        String e1 = s.put("logs/c", v, "t");
-        String e2 = s.put("logs/a", v, "t");
-        String e3 = s.put("data/z", v, "t");
-        String e4 = s.put("logs/b", v, "t");
-        String e5 = s.put("logs/d", v, "t");
-        ListPage p1 = s.list("logs/", "", "", (int64) 2);
+        int8[] v #= ObjectStoreTest.bytesOf("x");
+        String e1 #= s.put("logs/c", v, "t");
+        String e2 #= s.put("logs/a", v, "t");
+        String e3 #= s.put("data/z", v, "t");
+        String e4 #= s.put("logs/b", v, "t");
+        String e5 #= s.put("logs/d", v, "t");
+        ListPage p1 #= s.list("logs/", "", "", (int64) 2);
         Assert.isTrue(p1.ordered);
         Assert.equals((int64) 2, p1.count());
         Assert.isTrue(p1.keyAt((int64) 0).equals("logs/a"));
         Assert.isTrue(p1.keyAt((int64) 1).equals("logs/b"));
         Assert.isTrue(p1.nextToken().count() > 0);
-        ListPage p2 = s.list("logs/", "", p1.nextToken(), (int64) 2);
+        ListPage p2 #= s.list("logs/", "", p1.nextToken(), (int64) 2);
         Assert.equals((int64) 2, p2.count());
         Assert.isTrue(p2.keyAt((int64) 0).equals("logs/c"));
         Assert.isTrue(p2.keyAt((int64) 1).equals("logs/d"));
@@ -156,13 +156,13 @@ public class ObjectStoreTest {
     @Test
     public void delimiterGroupsCommonPrefixes() {
         MemoryObjectStore s = heap MemoryObjectStore();
-        int8[] v = ObjectStoreTest.bytesOf("x");
-        String e1 = s.put("a/one", v, "t");
-        String e2 = s.put("a/sub/deep1", v, "t");
-        String e3 = s.put("a/sub/deep2", v, "t");
-        String e4 = s.put("a/two", v, "t");
-        String e5 = s.put("a/zub/deep", v, "t");
-        ListPage p = s.list("a/", "/", "", (int64) 100);
+        int8[] v #= ObjectStoreTest.bytesOf("x");
+        String e1 #= s.put("a/one", v, "t");
+        String e2 #= s.put("a/sub/deep1", v, "t");
+        String e3 #= s.put("a/sub/deep2", v, "t");
+        String e4 #= s.put("a/two", v, "t");
+        String e5 #= s.put("a/zub/deep", v, "t");
+        ListPage p #= s.list("a/", "/", "", (int64) 100);
         Assert.equals((int64) 2, p.count());
         Assert.isTrue(p.keyAt((int64) 0).equals("a/one"));
         Assert.isTrue(p.keyAt((int64) 1).equals("a/two"));
@@ -177,28 +177,28 @@ public class ObjectStoreTest {
     @Test
     public void streamingWriteAtomicAndReaderSnapshots() {
         MemoryObjectStore s = heap MemoryObjectStore();
-        ObjectWriter w = s.openWrite("big", "application/octet-stream");
-        int8[] c1 = ObjectStoreTest.bytesOf("hello ");
-        int8[] c2 = ObjectStoreTest.bytesOf("streaming ");
-        int8[] c3 = ObjectStoreTest.bytesOf("world");
+        ObjectWriter w #= s.openWrite("big", "application/octet-stream");
+        int8[] c1 #= ObjectStoreTest.bytesOf("hello ");
+        int8[] c2 #= ObjectStoreTest.bytesOf("streaming ");
+        int8[] c3 #= ObjectStoreTest.bytesOf("world");
         w.write(c1, (int64) c1.count());
         w.write(c2, (int64) c2.count());
         Assert.isFalse(s.stat("big").exists);          // not yet visible
         w.write(c3, (int64) c3.count());
-        String etag = w.complete();
+        String etag #= w.complete();
         Assert.isTrue(ObjectStoreTest.textOf(s.get("big"))
             .equals("hello streaming world"));
         Assert.isTrue(s.stat("big").etag.equals(etag));
         // Abort: accumulated chunks vanish.
-        ObjectWriter w2 = s.openWrite("aborted", "t");
+        ObjectWriter w2 #= s.openWrite("aborted", "t");
         w2.write(c1, (int64) c1.count());
         w2.abort();
         Assert.isFalse(s.stat("aborted").exists);
         // Snapshot read across an overwrite.
-        ObjectReader r = s.openRead("big");
+        ObjectReader r #= s.openRead("big");
         Assert.equals((int64) 21, r.size());
-        int8[] over = ObjectStoreTest.bytesOf("REPLACED");
-        String e2 = s.put("big", over, "t");
+        int8[] over #= ObjectStoreTest.bytesOf("REPLACED");
+        String e2 #= s.put("big", over, "t");
         int8[] buf = heap int8[8];
         int8[] all = heap int8[64];
         int64 at = 0;
@@ -227,22 +227,22 @@ public class ObjectStoreTest {
     @Test
     public void multipartAssemblesInPartOrder() {
         MemoryObjectStore s = heap MemoryObjectStore();
-        MultipartUpload up = s.beginMultipart("mp", "t");
-        int8[] p3 = ObjectStoreTest.bytesOf("gamma");
-        int8[] p1 = ObjectStoreTest.bytesOf("alpha-");
-        int8[] p2 = ObjectStoreTest.bytesOf("WRONG");
+        MultipartUpload up #= s.beginMultipart("mp", "t");
+        int8[] p3 #= ObjectStoreTest.bytesOf("gamma");
+        int8[] p1 #= ObjectStoreTest.bytesOf("alpha-");
+        int8[] p2 #= ObjectStoreTest.bytesOf("WRONG");
         up.addPart(3, p3);
         up.addPart(1, p1);
         up.addPart(2, p2);
         Assert.isFalse(s.stat("mp").exists);           // §8.2
-        int8[] p2b = ObjectStoreTest.bytesOf("beta-");
+        int8[] p2b #= ObjectStoreTest.bytesOf("beta-");
         up.addPart(2, p2b);                            // replace
-        String etag = up.complete();
+        String etag #= up.complete();
         Assert.isTrue(ObjectStoreTest.textOf(s.get("mp"))
             .equals("alpha-beta-gamma"));
         Assert.isTrue(s.stat("mp").etag.equals(etag));
         // Abort: nothing ever appears.
-        MultipartUpload up2 = s.beginMultipart("mp2", "t");
+        MultipartUpload up2 #= s.beginMultipart("mp2", "t");
         up2.addPart(1, p1);
         up2.abort();
         Assert.isFalse(s.stat("mp2").exists);
@@ -254,10 +254,10 @@ public class ObjectStoreTest {
         }
         Assert.isTrue(threw);
         // Zero-part completion is an error, not an empty object.
-        MultipartUpload up3 = s.beginMultipart("mp3", "t");
+        MultipartUpload up3 #= s.beginMultipart("mp3", "t");
         threw = false;
         try {
-            String never = up3.complete();
+            String never #= up3.complete();
         } catch (CloudException e) {
             threw = true;
         }
@@ -270,9 +270,9 @@ public class ObjectStoreTest {
     @Test
     public void serverSideCopy() {
         MemoryObjectStore s = heap MemoryObjectStore();
-        int8[] v = ObjectStoreTest.bytesOf("payload");
-        String e1 = s.put("src", v, "text/plain");
-        String e2 = s.copy("src", "dst");
+        int8[] v #= ObjectStoreTest.bytesOf("payload");
+        String e1 #= s.put("src", v, "text/plain");
+        String e2 #= s.copy("src", "dst");
         Assert.isFalse(e2.equals(e1));
         Assert.isTrue(ObjectStoreTest.textOf(s.get("dst"))
             .equals("payload"));
@@ -281,7 +281,7 @@ public class ObjectStoreTest {
             .equals("payload"));
         boolean threw = false;
         try {
-            String never = s.copy("missing", "dst2");
+            String never #= s.copy("missing", "dst2");
         } catch (CloudException e) {
             threw = true;
             Assert.equals((int64) CloudException.NOT_FOUND(),
@@ -296,28 +296,28 @@ public class ObjectStoreTest {
     @Test
     public void conditionalWritesLoseHonestly() {
         MemoryObjectStore s = heap MemoryObjectStore();
-        int8[] a = ObjectStoreTest.bytesOf("A");
-        int8[] b = ObjectStoreTest.bytesOf("B");
-        CondResult w1 = s.putIfAbsent("k", a, "t");
+        int8[] a #= ObjectStoreTest.bytesOf("A");
+        int8[] b #= ObjectStoreTest.bytesOf("B");
+        CondResult w1 #= s.putIfAbsent("k", a, "t");
         Assert.isTrue(w1.won);
         // 3.1.12: the second creator MUST lose, and learns the
         // winner's token — exactly what it needs to re-read.
-        CondResult l1 = s.putIfAbsent("k", b, "t");
+        CondResult l1 #= s.putIfAbsent("k", b, "t");
         Assert.isFalse(l1.won);
         Assert.isTrue(l1.etag.equals(w1.etag));
         Assert.isTrue(ObjectStoreTest.textOf(s.get("k")).equals("A"));
         // putIfMatch with the CURRENT token wins and rotates the etag.
-        CondResult w2 = s.putIfMatch("k", b, "t", w1.etag);
+        CondResult w2 #= s.putIfMatch("k", b, "t", w1.etag);
         Assert.isTrue(w2.won);
         Assert.isFalse(w2.etag.equals(w1.etag));
         Assert.isTrue(ObjectStoreTest.textOf(s.get("k")).equals("B"));
         // A STALE token loses and reports the current one.
-        CondResult l2 = s.putIfMatch("k", a, "t", w1.etag);
+        CondResult l2 #= s.putIfMatch("k", a, "t", w1.etag);
         Assert.isFalse(l2.won);
         Assert.isTrue(l2.etag.equals(w2.etag));
         Assert.isTrue(ObjectStoreTest.textOf(s.get("k")).equals("B"));
         // putIfMatch against an ABSENT key is a mismatch, not a crash.
-        CondResult l3 = s.putIfMatch("nope", a, "t", w1.etag);
+        CondResult l3 #= s.putIfMatch("nope", a, "t", w1.etag);
         Assert.isFalse(l3.won);
         Assert.equals((int64) 0, (int64) l3.etag.count());
     }

@@ -78,7 +78,7 @@ final class AlwaysWinStore implements ObjectStore {
     /** The lie: everyone wins. */
     public #CondResult putIfAbsent(String key, int8[] bytes,
                                    String contentType) {
-        String etag = this.inner.put(key, bytes, contentType);
+        String etag #= this.inner.put(key, bytes, contentType);
         CondResult r = heap CondResult(true, #etag);
         return #r;
     }

@@ -74,7 +74,7 @@ public final class Capabilities {
             String e = "";
             return #e;
         }
-        String out = "" + this.notes.get(at);
+        String out #= "" + this.notes.get(at);
         return #out;
     }
 

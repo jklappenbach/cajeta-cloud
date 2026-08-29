@@ -27,7 +27,7 @@ public final class MemoryObjectStore implements ObjectStore {
     Capabilities caps;
 
     public MemoryObjectStore() {
-        this.st = heap MemState();
+        this.st #= heap MemState();
         Capabilities c = heap Capabilities("memory");
         c.declare(Caps.COND_PUT_CREATE(), "");
         c.declare(Caps.COND_PUT_OVERWRITE(), "");
@@ -51,7 +51,7 @@ public final class MemoryObjectStore implements ObjectStore {
     }
 
     public #int8[] get(String key) {
-        LockGuard g = this.st.lock.acquire();
+        LockGuard g #= this.st.lock.acquire();
         Blob b = this.st.blobs.get(key);
         if (b == null) {
             this.st.statsObj.recordCall((int64) 0, (int64) 0, (int64) 0,
@@ -68,7 +68,7 @@ public final class MemoryObjectStore implements ObjectStore {
     }
 
     public #StatResult stat(String key) {
-        LockGuard g = this.st.lock.acquire();
+        LockGuard g #= this.st.lock.acquire();
         Blob b = this.st.blobs.get(key);
         this.st.statsObj.recordCall((int64) 0, (int64) 0, (int64) 0,
                                     false);
@@ -87,7 +87,7 @@ public final class MemoryObjectStore implements ObjectStore {
     }
 
     public #int8[] getRange(String key, int64 offset, int64 length) {
-        LockGuard g = this.st.lock.acquire();
+        LockGuard g #= this.st.lock.acquire();
         Blob b = this.st.blobs.get(key);
         if (b == null) {
             this.st.statsObj.recordCall((int64) 0, (int64) 0, (int64) 0,
@@ -114,14 +114,14 @@ public final class MemoryObjectStore implements ObjectStore {
     }
 
     public boolean delete(String key) {
-        LockGuard g = this.st.lock.acquire();
+        LockGuard g #= this.st.lock.acquire();
         boolean existed = this.st.blobs.containsKey(key);
         if (existed) {
             Blob dropped = this.st.blobs.remove(key);
             int32 i = 0;
             while (i < this.st.sorted.count()) {
                 if (this.st.sorted.get(i).equals(key)) {
-                    String droppedKey = this.st.sorted.removeAt(i);
+                    String droppedKey #= this.st.sorted.removeAt(i);
                     i = this.st.sorted.count();
                 } else {
                     i = i + 1;
@@ -135,7 +135,7 @@ public final class MemoryObjectStore implements ObjectStore {
 
     public #String copy(String srcKey, String dstKey) {
         this.caps.require(Caps.SERVER_SIDE_COPY(), "copy", srcKey);
-        LockGuard g = this.st.lock.acquire();
+        LockGuard g #= this.st.lock.acquire();
         Blob b = this.st.blobs.get(srcKey);
         if (b == null) {
             this.st.statsObj.recordCall((int64) 0, (int64) 0, (int64) 0,
@@ -143,7 +143,7 @@ public final class MemoryObjectStore implements ObjectStore {
             throw heap CloudException(CloudException.NOT_FOUND(),
                 "memory", "copy", srcKey, "no such object");
         }
-        String etag = this.st.installLocked(dstKey, b.bytes,
+        String etag #= this.st.installLocked(dstKey, b.bytes,
             (int64) b.bytes.count(), b.contentType);
         this.st.statsObj.recordCall((int64) 0, (int64) 0, (int64) 0,
                                     false);
@@ -156,7 +156,7 @@ public final class MemoryObjectStore implements ObjectStore {
             throw heap CloudException(CloudException.PROVIDER_ERROR(),
                 "memory", "list", prefix, "maxKeys must be >= 1");
         }
-        LockGuard g = this.st.lock.acquire();
+        LockGuard g #= this.st.lock.acquire();
         ArrayList<String> keys = heap ArrayList<String>();
         ArrayList<String> prefixes = heap ArrayList<String>();
         String next = "";
@@ -171,7 +171,7 @@ public final class MemoryObjectStore implements ObjectStore {
                         prefix, delimiter);
                     if (dpos >= 0) {
                         // Grouped under a common prefix.
-                        String cp = k.substring((int32) 0,
+                        String cp #= k.substring((int32) 0,
                             (int32) dpos + delimiter.byteLength());
                         boolean seen = false;
                         int32 p = 0;
@@ -182,7 +182,7 @@ public final class MemoryObjectStore implements ObjectStore {
                         if (!seen) {
                             if ((int64) (keys.count() + prefixes.count())
                                 >= maxKeys) {
-                                next = "" + this.st.sorted.get(i - 1);
+                                next #= "" + this.st.sorted.get(i - 1);
                                 i = this.st.sorted.count();
                             } else {
                                 prefixes.add(#cp);
@@ -192,7 +192,7 @@ public final class MemoryObjectStore implements ObjectStore {
                     } else {
                         if ((int64) (keys.count() + prefixes.count())
                             >= maxKeys) {
-                            next = "" + this.st.sorted.get(i - 1);
+                            next #= "" + this.st.sorted.get(i - 1);
                             i = this.st.sorted.count();
                         } else {
                             String kk = "" + k;
@@ -202,7 +202,7 @@ public final class MemoryObjectStore implements ObjectStore {
                     }
                 } else {
                     if ((int64) keys.count() >= maxKeys) {
-                        next = "" + this.st.sorted.get(i - 1);
+                        next #= "" + this.st.sorted.get(i - 1);
                         i = this.st.sorted.count();
                     } else {
                         String kk = "" + k;
@@ -221,7 +221,7 @@ public final class MemoryObjectStore implements ObjectStore {
         String[] ea = heap String[nk];
         int64 t = 0;
         while (t < nk) {
-            ka[t] = "" + keys.get((int32) t);
+            ka[t] #= "" + keys.get((int32) t);
             Blob b = this.st.blobs.get(ka[t]);
             sa[t] = (int64) b.bytes.count();
             ma[t] = b.modified;
@@ -232,7 +232,7 @@ public final class MemoryObjectStore implements ObjectStore {
         String[] pa = heap String[np];
         t = 0;
         while (t < np) {
-            pa[t] = "" + prefixes.get((int32) t);
+            pa[t] #= "" + prefixes.get((int32) t);
             t = t + 1;
         }
         this.st.statsObj.recordCall((int64) 0, (int64) 0, (int64) 0,
@@ -251,14 +251,14 @@ public final class MemoryObjectStore implements ObjectStore {
     static int64 indexAfterPrefix(String k, String prefix,
                                   String delimiter) {
         int64 from = (int64) prefix.byteLength();
-        String tail = k.substring((int32) from, k.byteLength());
+        String tail #= k.substring((int32) from, k.byteLength());
         int64 rel = tail.indexOf(delimiter);
         if (rel < 0) { return -1; }
         return from + rel;
     }
 
     public #ObjectReader openRead(String key) {
-        LockGuard g = this.st.lock.acquire();
+        LockGuard g #= this.st.lock.acquire();
         Blob b = this.st.blobs.get(key);
         if (b == null) {
             throw heap CloudException(CloudException.NOT_FOUND(),
@@ -290,7 +290,7 @@ public final class MemoryObjectStore implements ObjectStore {
     public #CondResult putIfAbsent(String key, int8[] bytes,
                                    String contentType) {
         this.caps.require(Caps.COND_PUT_CREATE(), "putIfAbsent", key);
-        LockGuard g = this.st.lock.acquire();
+        LockGuard g #= this.st.lock.acquire();
         Blob cur = this.st.blobs.get(key);
         if (cur != null) {
             // The loser learns it lost, with the current token (§7.1).
@@ -300,7 +300,7 @@ public final class MemoryObjectStore implements ObjectStore {
             CondResult r = heap CondResult(false, #et);
             return #r;
         }
-        String etag = this.st.installLocked(key, bytes,
+        String etag #= this.st.installLocked(key, bytes,
             (int64) bytes.count(), contentType);
         this.st.statsObj.recordCall((int64) 0, (int64) bytes.count(),
             (int64) 0, false);
@@ -311,7 +311,7 @@ public final class MemoryObjectStore implements ObjectStore {
     public #CondResult putIfMatch(String key, int8[] bytes,
                                   String contentType, String etag) {
         this.caps.require(Caps.COND_PUT_OVERWRITE(), "putIfMatch", key);
-        LockGuard g = this.st.lock.acquire();
+        LockGuard g #= this.st.lock.acquire();
         Blob cur = this.st.blobs.get(key);
         if (cur == null || !cur.etag.equals(etag)) {
             String et = "";
@@ -321,7 +321,7 @@ public final class MemoryObjectStore implements ObjectStore {
             CondResult r = heap CondResult(false, #et);
             return #r;
         }
-        String newTag = this.st.installLocked(key, bytes,
+        String newTag #= this.st.installLocked(key, bytes,
             (int64) bytes.count(), contentType);
         this.st.statsObj.recordCall((int64) 0, (int64) bytes.count(),
             (int64) 0, false);

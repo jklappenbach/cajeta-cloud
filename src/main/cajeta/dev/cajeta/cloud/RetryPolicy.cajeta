@@ -55,7 +55,7 @@ public final class RetryPolicy {
             k = k + 1;
         }
         if (raw > this.maxMillis) { raw = this.maxMillis; }
-        Tensor<float32> u = this.jitter.uniform((int64) 1);
+        Tensor<float32> u #= this.jitter.uniform((int64) 1);
         float64 factor = 0.5 + 0.5 * (float64) u.flatGet((int64) 0);
         int64 out = (int64) ((float64) raw * factor);
         if (out < 1) { out = 1; }

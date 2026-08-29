@@ -44,25 +44,25 @@ public class StreamTest {
     @Test
     public void opaquePositionRoundtrip() {
         MemoryStream ms = heap MemoryStream(1);
-        int8[] p1 = StreamTest.pay("one");
-        int8[] p2 = StreamTest.pay("two");
-        int8[] p3 = StreamTest.pay("three");
-        String q1 = ms.publish(p1, "");
-        String q2 = ms.publish(p2, "");
-        String q3 = ms.publish(p3, "");
-        StreamCursor c = ms.openCursor("s0", StartAt.oldest());
-        Batch b1 = c.next((int64) 2);
+        int8[] p1 #= StreamTest.pay("one");
+        int8[] p2 #= StreamTest.pay("two");
+        int8[] p3 #= StreamTest.pay("three");
+        String q1 #= ms.publish(p1, "");
+        String q2 #= ms.publish(p2, "");
+        String q3 #= ms.publish(p3, "");
+        StreamCursor c #= ms.openCursor("s0", StartAt.oldest());
+        Batch b1 #= c.next((int64) 2);
         Assert.equals((int64) 2, (int64) b1.count());
-        String stored = b1.nextPosition();          // the caller stores it
+        String stored #= b1.nextPosition();          // the caller stores it
         c.close();
         // Later, elsewhere: resume from the stored token.
-        StreamCursor c2 = ms.openCursor("s0", StartAt.position(stored));
-        Batch b2 = c2.next((int64) 10);
+        StreamCursor c2 #= ms.openCursor("s0", StartAt.position(stored));
+        Batch b2 #= c2.next((int64) 10);
         Assert.equals((int64) 1, (int64) b2.count());
         Assert.isTrue(StreamTest.text(b2.eventAt(0).payload)
             .equals("three"));
         // The port stored nothing: from-oldest still sees all three.
-        StreamCursor c3 = ms.openCursor("s0", StartAt.oldest());
+        StreamCursor c3 #= ms.openCursor("s0", StartAt.oldest());
         Assert.equals((int64) 3, (int64) c3.next((int64) 10).count());
     }
 
@@ -70,10 +70,10 @@ public class StreamTest {
     @Test
     public void subStreamSetIsDynamic() {
         MemoryStream ms = heap MemoryStream(2);
-        String[] before = ms.subStreamIds();
+        String[] before #= ms.subStreamIds();
         Assert.equals((int64) 2, (int64) before.count());
         ms.split("s0");
-        String[] after = ms.subStreamIds();
+        String[] after #= ms.subStreamIds();
         Assert.equals((int64) 3, (int64) after.count());  // s1, s0.0, s0.1
         int32 i = 0;
         boolean sawClosed = false;
@@ -90,22 +90,22 @@ public class StreamTest {
     @Test
     public void reshardDrainsThenFollowsSuccessors() {
         MemoryStream ms = heap MemoryStream(1);
-        int8[] a = StreamTest.pay("pre-1");
-        int8[] b = StreamTest.pay("pre-2");
-        String q1 = ms.publish(a, "k");
-        String q2 = ms.publish(b, "k");
+        int8[] a #= StreamTest.pay("pre-1");
+        int8[] b #= StreamTest.pay("pre-2");
+        String q1 #= ms.publish(a, "k");
+        String q2 #= ms.publish(b, "k");
         ms.split("s0");
-        int8[] c = StreamTest.pay("post-1");
-        int8[] d = StreamTest.pay("post-2");
-        String q3 = ms.publish(c, "k");
-        String q4 = ms.publish(d, "x");
+        int8[] c #= StreamTest.pay("post-1");
+        int8[] d #= StreamTest.pay("post-2");
+        String q3 #= ms.publish(c, "k");
+        String q4 #= ms.publish(d, "x");
         // The closed stream still drains fully, then reports closed.
-        StreamCursor cur = ms.openCursor("s0", StartAt.oldest());
-        Batch drain = cur.next((int64) 10);
+        StreamCursor cur #= ms.openCursor("s0", StartAt.oldest());
+        Batch drain #= cur.next((int64) 10);
         Assert.equals((int64) 2, (int64) drain.count());
         Assert.isTrue(drain.closed);
         // Successors are obtainable from the closed stream's info.
-        SubStreamInfo info = ms.describe("s0");
+        SubStreamInfo info #= ms.describe("s0");
         Assert.isFalse(info.open);
         Assert.equals((int64) 2, (int64) info.successorCount());
         // Every post-split record is on some successor: total in =
@@ -113,9 +113,9 @@ public class StreamTest {
         int64 got = 0;
         int32 s = 0;
         while (s < info.successorCount()) {
-            StreamCursor sc = ms.openCursor(info.successorAt(s),
+            StreamCursor sc #= ms.openCursor(info.successorAt(s),
                 StartAt.oldest());
-            got = got + (int64) sc.next((int64) 10).count();
+            got #= got + (int64) sc.next((int64) 10).count();
             s = s + 1;
         }
         Assert.equals((int64) 2, got);
@@ -125,36 +125,36 @@ public class StreamTest {
     @Test
     public void allFourStartingPositions() {
         MemoryStream ms = heap MemoryStream(1);
-        int8[] e1 = StreamTest.pay("e1");
-        int8[] e2 = StreamTest.pay("e2");
-        int8[] e3 = StreamTest.pay("e3");
-        int8[] e4 = StreamTest.pay("e4");
-        String q1 = ms.publish(e1, "");
-        String q2 = ms.publish(e2, "");
-        String q3 = ms.publish(e3, "");
-        String q4 = ms.publish(e4, "");
+        int8[] e1 #= StreamTest.pay("e1");
+        int8[] e2 #= StreamTest.pay("e2");
+        int8[] e3 #= StreamTest.pay("e3");
+        int8[] e4 #= StreamTest.pay("e4");
+        String q1 #= ms.publish(e1, "");
+        String q2 #= ms.publish(e2, "");
+        String q3 #= ms.publish(e3, "");
+        String q4 #= ms.publish(e4, "");
         // oldest
-        StreamCursor c1 = ms.openCursor("s0", StartAt.oldest());
+        StreamCursor c1 #= ms.openCursor("s0", StartAt.oldest());
         Assert.equals((int64) 4, (int64) c1.next((int64) 10).count());
         // newest: sees only what arrives after
-        StreamCursor c2 = ms.openCursor("s0", StartAt.newest());
+        StreamCursor c2 #= ms.openCursor("s0", StartAt.newest());
         Assert.equals((int64) 0, (int64) c2.next((int64) 10).count());
-        int8[] e5 = StreamTest.pay("e5");
-        String q5 = ms.publish(e5, "");
-        Batch nb = c2.next((int64) 10);
+        int8[] e5 #= StreamTest.pay("e5");
+        String q5 #= ms.publish(e5, "");
+        Batch nb #= c2.next((int64) 10);
         Assert.equals((int64) 1, (int64) nb.count());
         Assert.isTrue(StreamTest.text(nb.eventAt(0).payload)
             .equals("e5"));
         // stored position: covered in opaquePositionRoundtrip; here
         // via the PUBLISH-returned token of e3 — a cursor there sees
         // e3 onward.
-        StreamCursor c3 = ms.openCursor("s0", StartAt.position(q3));
-        Batch pb = c3.next((int64) 10);
+        StreamCursor c3 #= ms.openCursor("s0", StartAt.position(q3));
+        Batch pb #= c3.next((int64) 10);
         Assert.equals((int64) 3, (int64) pb.count());
         Assert.isTrue(StreamTest.text(pb.eventAt(0).payload)
             .equals("e3"));
         // timestamp: from e4's timestamp onward (e4, e5).
-        StreamCursor c4 = ms.openCursor("s0",
+        StreamCursor c4 #= ms.openCursor("s0",
             StartAt.timestamp(pb.eventAt(1).timestamp));
         Assert.equals((int64) 2, (int64) c4.next((int64) 10).count());
     }
@@ -164,10 +164,10 @@ public class StreamTest {
     @Test
     public void batchCarriesTheFullRecord() {
         MemoryStream ms = heap MemoryStream(1);
-        int8[] p = StreamTest.pay("payload!");
-        String q = ms.publish(p, "the-key");
-        StreamCursor c = ms.openCursor("s0", StartAt.oldest());
-        Batch b = c.next((int64) 1);
+        int8[] p #= StreamTest.pay("payload!");
+        String q #= ms.publish(p, "the-key");
+        StreamCursor c #= ms.openCursor("s0", StartAt.oldest());
+        Batch b #= c.next((int64) 1);
         Assert.equals((int64) 1, (int64) b.count());
         Event e = b.eventAt(0);
         Assert.isTrue(StreamTest.text(e.payload).equals("payload!"));
@@ -177,19 +177,19 @@ public class StreamTest {
         Assert.isTrue(e.position.equals(q));
         // Same key → same sub-stream, in order (2-sub stream).
         MemoryStream ms2 = heap MemoryStream(2);
-        int8[] r1 = StreamTest.pay("r1");
-        int8[] r2 = StreamTest.pay("r2");
-        int8[] r3 = StreamTest.pay("r3");
-        String w1 = ms2.publish(r1, "same");
-        String w2 = ms2.publish(r2, "same");
-        String w3 = ms2.publish(r3, "same");
-        String[] ids = ms2.subStreamIds();
+        int8[] r1 #= StreamTest.pay("r1");
+        int8[] r2 #= StreamTest.pay("r2");
+        int8[] r3 #= StreamTest.pay("r3");
+        String w1 #= ms2.publish(r1, "same");
+        String w2 #= ms2.publish(r2, "same");
+        String w3 #= ms2.publish(r3, "same");
+        String[] ids #= ms2.subStreamIds();
         int64 total = 0;
         int64 maxOnOne = 0;
         int32 i = 0;
         while (i < (int32) ids.count()) {
-            StreamCursor sc = ms2.openCursor(ids[i], StartAt.oldest());
-            int64 n = (int64) sc.next((int64) 10).count();
+            StreamCursor sc #= ms2.openCursor(ids[i], StartAt.oldest());
+            int64 n #= (int64) sc.next((int64) 10).count();
             total = total + n;
             if (n > maxOnOne) { maxOnOne = n; }
             i = i + 1;
@@ -203,13 +203,13 @@ public class StreamTest {
     @Test
     public void rateLimitSurfacesTransient() {
         MemoryStream ms = heap MemoryStream(1);
-        int8[] p = StreamTest.pay("x");
-        String q = ms.publish(p, "");
+        int8[] p #= StreamTest.pay("x");
+        String q #= ms.publish(p, "");
         ms.induceRateLimit(1);
-        StreamCursor c = ms.openCursor("s0", StartAt.oldest());
+        StreamCursor c #= ms.openCursor("s0", StartAt.oldest());
         boolean threw = false;
         try {
-            Batch never = c.next((int64) 1);
+            Batch never #= c.next((int64) 1);
         } catch (CloudException e) {
             threw = true;
             Assert.isTrue(e.isTransient());

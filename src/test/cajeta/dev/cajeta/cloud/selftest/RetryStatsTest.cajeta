@@ -32,10 +32,10 @@ public class RetryStatsTest {
     // 5.1 — retry gates on BOTH transience and remaining attempts.
     @Test
     public void retryGatesOnKindAndAttempts() {
-        RetryPolicy p = RetryPolicy.standard((uint64) 42);
+        RetryPolicy p #= RetryPolicy.standard((uint64) 42);
         Assert.equals((int64) 4, (int64) p.attempts());
-        CloudException t = RetryStatsTest.transientErr();
-        CloudException n = RetryStatsTest.permanentErr();
+        CloudException t #= RetryStatsTest.transientErr();
+        CloudException n #= RetryStatsTest.permanentErr();
         Assert.isTrue(t.isTransient());
         Assert.isFalse(n.isTransient());
         Assert.isTrue(p.shouldRetry(t, 0));

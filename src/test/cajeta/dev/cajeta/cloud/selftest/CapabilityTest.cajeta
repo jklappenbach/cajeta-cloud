@@ -56,9 +56,9 @@ public class CapabilityTest {
         Capabilities c = heap Capabilities("bare");
         c.declare(Caps.RANGE_READ(), "");
         String[] need = heap String[3];
-        need[0] = Caps.RANGE_READ();
-        need[1] = Caps.COND_PUT_CREATE();
-        need[2] = Caps.MULTIPART();
+        need[0] #= Caps.RANGE_READ();
+        need[1] #= Caps.COND_PUT_CREATE();
+        need[2] #= Caps.MULTIPART();
         boolean threw = false;
         try {
             c.assertAll(need);
@@ -71,7 +71,7 @@ public class CapabilityTest {
         Assert.isTrue(threw);
         // All present → passes.
         String[] ok = heap String[1];
-        ok[0] = Caps.RANGE_READ();
+        ok[0] #= Caps.RANGE_READ();
         c.assertAll(ok);
     }
 

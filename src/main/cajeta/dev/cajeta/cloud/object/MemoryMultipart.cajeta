@@ -23,7 +23,7 @@ final class MemoryMultipart implements MultipartUpload {
 
     MemoryMultipart(MemState st, String key,
                     String contentType) {
-        this.st = st;
+        this.st #= st;
         this.key = "" + key;
         this.contentType = "" + contentType;
         this.nums = heap ArrayList<Int64>();
@@ -97,7 +97,7 @@ final class MemoryMultipart implements MultipartUpload {
         int64 total = 0;
         r = 0;
         while (r < m) {
-            total = total + (int64) this.datas.get(order[r]).bytes.count();
+            total #= total + (int64) this.datas.get(order[r]).bytes.count();
             r = r + 1;
         }
         int8[] all = heap int8[total];
