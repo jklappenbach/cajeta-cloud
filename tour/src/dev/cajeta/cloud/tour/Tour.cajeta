@@ -47,19 +47,19 @@ public final class Tour {
     static void objectPassage() {
         System.stdout.println("passage: the object-store port");
         ObjectStore store = heap MemoryObjectStore();
-        int8[] doc = "the quarterly report".toBytes();
-        String etag = store.put("reports/q3", doc, "text/plain");
+        int8[] doc #= "the quarterly report".toBytes();
+        String etag #= store.put("reports/q3", doc, "text/plain");
         Tour.check(Tour.text(store.get("reports/q3"))
             .equals("the quarterly report"),
             "put/get roundtrip through the port interface");
         Tour.check(!store.stat("reports/q4").exists,
             "absence is explicit — never null, never empty bytes");
-        int8[] head = store.getRange("reports/q3", (int64) 4, (int64) 9);
+        int8[] head #= store.getRange("reports/q3", (int64) 4, (int64) 9);
         Tour.check(Tour.text(head).equals("quarterly"),
             "a range read returns exactly the requested slice");
-        String e2 = store.put("reports/annual", doc, "text/plain");
-        String e3 = store.put("archive/q1", doc, "text/plain");
-        ListPage page = store.list("reports/", "", "", (int64) 10);
+        String e2 #= store.put("reports/annual", doc, "text/plain");
+        String e3 #= store.put("archive/q1", doc, "text/plain");
+        ListPage page #= store.list("reports/", "", "", (int64) 10);
         Tour.check(page.count() == 2 && page.ordered,
             "prefix listing, with the order guarantee carried in-band");
         return;
@@ -69,19 +69,19 @@ public final class Tour {
     static void conditionalPassage() {
         System.stdout.println("passage: conditional writes");
         ObjectStore store = heap MemoryObjectStore();
-        int8[] mine = "writer-A".toBytes();
-        int8[] yours = "writer-B".toBytes();
-        CondResult first = store.putIfAbsent("leases/job-7", mine, "t");
-        CondResult second = store.putIfAbsent("leases/job-7", yours, "t");
+        int8[] mine #= "writer-A".toBytes();
+        int8[] yours #= "writer-B".toBytes();
+        CondResult first #= store.putIfAbsent("leases/job-7", mine, "t");
+        CondResult second #= store.putIfAbsent("leases/job-7", yours, "t");
         Tour.check(first.won && !second.won,
             "exactly one creator wins; the loser LEARNS it lost");
         Tour.check(second.etag.equals(first.etag),
             "the loser receives the winner's token — re-read and retry");
-        CondResult swap = store.putIfMatch("leases/job-7", yours, "t",
+        CondResult swap #= store.putIfMatch("leases/job-7", yours, "t",
             first.etag);
         Tour.check(swap.won,
             "compare-and-swap advances holders of the current token");
-        CondResult stale = store.putIfMatch("leases/job-7", mine, "t",
+        CondResult stale #= store.putIfMatch("leases/job-7", mine, "t",
             first.etag);
         Tour.check(!stale.won,
             "a stale token loses — losing is a result, not an exception");
@@ -96,8 +96,8 @@ public final class Tour {
         Tour.check(caps.supports(Caps.COND_PUT_CREATE()),
             "capabilities answer definitively BEFORE any operation");
         String[] needed = heap String[2];
-        needed[0] = Caps.COND_PUT_CREATE();
-        needed[1] = Caps.RANGE_READ();
+        needed[0] #= Caps.COND_PUT_CREATE();
+        needed[1] #= Caps.RANGE_READ();
         caps.assertAll(needed);
         Tour.check(true,
             "a deployment pins its needs at startup with assertAll");
@@ -118,29 +118,29 @@ public final class Tour {
     static void streamPassage() {
         System.stdout.println("passage: the stream port");
         MemoryStream stream = heap MemoryStream(1);
-        int8[] r1 = "sensor-1".toBytes();
-        int8[] r2 = "sensor-2".toBytes();
-        int8[] r3 = "sensor-3".toBytes();
-        String p1 = stream.publish(r1, "device-9");
-        String p2 = stream.publish(r2, "device-9");
-        StreamCursor cur = stream.openCursor("s0", StartAt.oldest());
-        Batch b1 = cur.next((int64) 1);
-        String stored = b1.nextPosition();   // YOURS to store (§12.5.2)
+        int8[] r1 #= "sensor-1".toBytes();
+        int8[] r2 #= "sensor-2".toBytes();
+        int8[] r3 #= "sensor-3".toBytes();
+        String p1 #= stream.publish(r1, "device-9");
+        String p2 #= stream.publish(r2, "device-9");
+        StreamCursor cur #= stream.openCursor("s0", StartAt.oldest());
+        Batch b1 #= cur.next((int64) 1);
+        String stored #= b1.nextPosition();   // YOURS to store (§12.5.2)
         Tour.check(b1.count() == 1,
             "batches deliver payload, key, timestamp, and position");
-        StreamCursor resumed = stream.openCursor("s0",
+        StreamCursor resumed #= stream.openCursor("s0",
             StartAt.position(stored));
         Tour.check(Tour.text(resumed.next((int64) 5).eventAt(0).payload)
             .equals("sensor-2"),
             "an opaque stored token resumes exactly where you left off");
         // A reshard: the closed sub-stream drains, then successors.
         stream.split("s0");
-        String p3 = stream.publish(r3, "device-9");
-        StreamCursor drain = stream.openCursor("s0", StartAt.oldest());
-        Batch all = drain.next((int64) 10);
+        String p3 #= stream.publish(r3, "device-9");
+        StreamCursor drain #= stream.openCursor("s0", StartAt.oldest());
+        Batch all #= drain.next((int64) 10);
         Tour.check(all.count() == 2 && all.closed,
             "a closed sub-stream drains to its END — nothing skipped");
-        SubStreamInfo info = stream.describe("s0");
+        SubStreamInfo info #= stream.describe("s0");
         Tour.check(info.successorCount() == 2,
             "successors are obtainable; consumption continues");
         return;
@@ -149,7 +149,7 @@ public final class Tour {
     /** Passage 5 — errors, retry, redaction, and the testkit. */
     static void operationsPassage() {
         System.stdout.println("passage: operations");
-        RetryPolicy policy = RetryPolicy.standard((uint64) 42);
+        RetryPolicy policy #= RetryPolicy.standard((uint64) 42);
         CloudException throttle = heap CloudException(
             CloudException.TRANSIENT(), "s3", "put", "b/k", "throttled");
         Tour.check(policy.shouldRetry(throttle, 0)
