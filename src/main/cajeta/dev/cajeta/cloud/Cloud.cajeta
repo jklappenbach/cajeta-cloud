@@ -14,8 +14,8 @@ package dev.cajeta.cloud;
  * This is the library entry class (the `--emit=cja` root).
  */
 public final class Cloud {
-    /** The library version. */
-    public static #String version() { return "0.1.0"; }
+    /** The library version; run-tests.sh gates it against cajeta.json. */
+    public static #String version() { return "0.1.1"; }
 
     /** `--emit=cja` entry. */
     public static int32 run() { return 0; }

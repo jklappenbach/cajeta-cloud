@@ -32,12 +32,37 @@ permissions:
 env:
   # Must match a release tag of jklappenbach/cajeta.
   #
-  # v0.17.4 is the floor for this library: it is the first release whose
-  # stdlib carries BOTH cajeta.math.optim (L-BFGS/Nelder-Mead — the MA/ARMA
-  # likelihood path is estimated through it, stdlib-completion U5) at a
-  # deterministic-compilation baseline AND the current cajeta.math surface
-  # (fft for §6.5 autocovariance, stats for test p-values). Do not pin back.
-  CAJETA_VERSION: v0.17.4
+  # v0.17.4 was inherited verbatim when this workflow was cloned from a
+  # timeseries library. Its rationale named cajeta.math.optim, fft and
+  # stats, which describe that library and not this one. cajeta-cloud
+  # touches no math surface at all, so that floor was never this
+  # library's floor.
+  #
+  # Every claim below was measured against this tree on 2026-09-21, on
+  # the released binaries, with the artifact cache cleared between runs.
+  #
+  # 1. v0.17.4 CANNOT RUN this tree. It compiles the sources and the
+  #    library archive, and then the test binary dies with SIGSEGV
+  #    walking the drop chain out of ObjectStoreTest, before a single
+  #    test reports. Measured with unit 0.2.0, which is exactly the pair
+  #    this workflow installed. The pin was green in name only.
+  # 2. The floor is NOT v0.29.0 and the comment should not pretend it
+  #    is. v0.28.0 runs the suite green at 35 passed, 0 failed, 1
+  #    skipped, exactly as v0.29.0 does, and neither says anything the
+  #    other does not. Between those two this is alignment with the
+  #    ecosystem's current release, not a capability the sources need.
+  # 3. The unit peg has to move with it. A consumer's compiler re-checks
+  #    a dependency archive's OWN sources, and the published
+  #    dev.cajeta.unit 0.2.0 archive fails
+  #    CAJETA_ERROR_CAPTURED_BORROW_PARAM on PredMatcher.pred — a symbol
+  #    this library does not contain — under v0.28.0 and v0.29.0 alike.
+  #    cajeta.json pegs unit 0.3.0, the first archive that stores that
+  #    closure parameter with `#=`.
+  #
+  # Pin forward, never back. The floor was not bisected past these three
+  # points, so the only honest statement is that v0.28.0 and v0.29.0 run
+  # this tree and v0.17.4 does not.
+  CAJETA_VERSION: v0.29.0
 
 jobs:
   build-test:

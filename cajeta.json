@@ -19,10 +19,22 @@
     // (§12 — shaped against Kinesis AND Kafka, not assumed).
     //
     // VERSIONING — `details.version` is the SINGLE source of truth.
+    // `Cloud.version()` returns a literal copy of it and run-tests.sh
+    // fails the build when the two disagree.
+    //
+    // 0.1.1 is a re-cut, not new API. The published 0.1.0 archive cannot
+    // be put on a consumer's classpath any more: a consumer's compiler
+    // re-checks a dependency archive's OWN sources, and under v0.28.0 and
+    // v0.29.0 alike the 0.1.0 sources fail with
+    // CAJETA_ERROR_CAPTURED_BORROW_PARAM on `MemState st`. c768196 fixed
+    // that in the tree and it has never been cut, so every consumer of
+    // dev.cajeta.cloud is currently broken. Measured 2026-09-21 by
+    // fetching the 0.1.0 blob from Olla and compiling a two-line consumer
+    // against it.
 
     "details": {
         "name":               "dev.cajeta.cloud",
-        "version":            "0.1.0",
+        "version":            "0.1.1",
         "description":        "cajeta-cloud — provider-neutral cloud ports: object store + stream, in-memory drivers, conformance testkits, capability negotiation",
         "license":            "Apache-2.0",
         "authors":            ["Julian Klappenbach"],
@@ -30,6 +42,26 @@
     },
 
     "settings": {
+        // Compiler build this library is developed against (distinct from
+        // cajeta-lang-version, which pins the language/stdlib API surface).
+        // Keep it in step with `CAJETA_VERSION` in
+        // .github/workflows/ci.yml — that one is what CI installs, this
+        // one documents what the tree was gated on.
+        "toolchain": {
+            // The first pin this tree has ever carried, set at the
+            // ecosystem's current release.
+            //
+            // There IS a floor and the old workflow pin sat below it.
+            // v0.17.4 compiles these sources and then the test binary
+            // SIGSEGVs walking the drop chain out of ObjectStoreTest,
+            // before a single test reports. v0.28.0 and v0.29.0 both run
+            // the suite green at 35 passed, 0 failed, 1 skipped and both
+            // run the tour clean, so the choice between those two is
+            // alignment rather than capability. All three measured on the
+            // released binaries on 2026-09-21.
+            "version": "0.29.0"
+        },
+
         // THE load-bearing line (§14.11): no filesystem, no network.
         "capabilities": [],
 
@@ -37,8 +69,15 @@
         // stdlib (§14.13).
         "dependencies": {},
 
+        // 0.3.0, raised from 0.2.0 with the toolchain and for the same
+        // reason the toolchain moved. A dependency archive is re-checked
+        // from its OWN sources, and every 0.2.x archive fails
+        // CAJETA_ERROR_CAPTURED_BORROW_PARAM on `PredMatcher.pred` the
+        // moment it goes on a classpath: 0.2.0 under v0.28.0 and v0.29.0,
+        // 0.2.3 and 0.2.5 under v0.29.0. 0.3.0 is the first that stores
+        // that closure parameter with `#=`.
         "dev-dependencies": {
-            "dev.cajeta.unit": "0.2.0"
+            "dev.cajeta.unit": "0.3.0"
         },
 
         "repositories": [
@@ -84,10 +123,17 @@
             "outputs": { "path": "${art.path}", "sha256": "${art.sha256}" }
         },
 
+        // `exec` runs a program directly with no shell, so the whole
+        // command cannot live in "command". The old spelling was
+        // "command": "rm -rf build", and it was broken on every toolchain
+        // measured: v0.17.4 ran the task and exited 127, "No such file or
+        // directory", while v0.28.0 and v0.29.0 reject the manifest and
+        // name this fix. v0.29.0 validates EVERY task, so a bad `clean`
+        // failed `cajeta build` and blocked the tour.
         "clean": {
             "description": "Remove build outputs",
             "actions": [
-                { "action": "exec", "command": "rm -rf build" }
+                { "action": "exec", "command": "rm", "args": ["-rf", "build"] }
             ]
         }
     }
