@@ -15,8 +15,8 @@ provider account (§14.12).
 
 ```cajeta
 ObjectStore store = heap MemoryObjectStore();      // any adapter here
-String etag = store.put("reports/q3", bytes, "text/plain");
-CondResult r = store.putIfAbsent("leases/job-7", body, "t");
+String etag #= store.put("reports/q3", bytes, "text/plain");
+CondResult r #= store.putIfAbsent("leases/job-7", body, "t");
 if (!r.won) { /* r.etag is the CURRENT token — re-read and retry */ }
 ```
 
@@ -174,9 +174,24 @@ CAJETA=<path-to-cajeta> ./run-tests.sh   # 35 tests
 CAJETA=<path-to-cajeta> ./run-tour.sh    # the self-checking tour
 ```
 
-Toolchain: cajeta v0.17.4. Two v0.17.4 defects are worked around in
-this codebase (both registered upstream): String-valued `HashMap`s
-double-free on drop (`Capabilities` uses parallel ArrayLists), and
-back-reference fields to interface-implementing classes crash the
-compiler's drop synthesis (writers/cursors hold the extracted
-`MemState`/`StreamState` guts instead of the store).
+Toolchain: cajeta v0.29.0. v0.17.4, which this workflow pinned until
+now, compiles the library and then the test binary segfaults walking
+the drop chain before a single test reports, so that pin was green in
+name only. v0.28.0 and v0.29.0 both run the suite at 35 passed, 0
+failed, 1 skipped.
+
+Two v0.17.4 defects are worked around in this codebase, and their
+status now differs:
+
+- String-valued `HashMap`s double-freed on drop, so `Capabilities`
+  stores parallel `ArrayList`s. **Fixed.** A probe that builds a
+  `HashMap<String, String>`, fills it, and lets it drop crashes on
+  v0.17.4 and prints `survived the drop` on v0.29.0. The parallel
+  lists stay because they work, cost nothing at a dozen capabilities,
+  and are private to the class.
+- Back-reference fields to interface-implementing classes crashed the
+  compiler's drop synthesis, so writers and cursors hold the extracted
+  `MemState`/`StreamState` guts instead of the store. **Unverified.** A
+  minimal reproduction of that shape does not crash v0.17.4 either, so
+  it is not a valid instrument and a clean run on v0.29.0 would prove
+  nothing. The workaround stays until the real shape is recovered.

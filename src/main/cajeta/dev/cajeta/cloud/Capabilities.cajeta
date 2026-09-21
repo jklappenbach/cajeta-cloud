@@ -13,11 +13,11 @@ import cajeta.lang.String;
  * on launch rather than mid-write (§3.3; cajeta-dqe asserts
  * conditional put this way).
  *
- * Storage is a pair of parallel ArrayLists, NOT HashMap<String,String>:
- * a String-VALUED HashMap double-frees its stored strings on drop
- * under v0.17.4 (registered toolchain defect; every shipped map uses
- * non-String values, which is why it never surfaced before). Adapters
- * declare fewer than a dozen capabilities, so the linear scan is free.
+ * Storage is a pair of parallel ArrayLists rather than a
+ * HashMap<String,String>, which double-freed its values on drop under
+ * v0.17.4. That is fixed as of v0.29.0; the lists stay because an
+ * adapter declares fewer than a dozen capabilities and the linear scan
+ * is free.
  */
 public final class Capabilities {
 
