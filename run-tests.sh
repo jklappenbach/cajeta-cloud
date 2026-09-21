@@ -115,6 +115,20 @@ grep -q '"dependencies": {}' "$here/cajeta.json" \
     || { echo "SPEC VIOLATION (§14.13): runtime dependencies must stay {}" >&2; exit 1; }
 echo ">> manifest: capabilities [] and dependencies {} verified"
 
+# `details.version` is the single source of truth and `Cloud.version()`
+# hands consumers a literal copy of it. Nothing at runtime can compare
+# them, because the library declares no filesystem capability and so
+# cannot read its own manifest, so the gate lives here.
+manifest_version="$( cd "$here" && "$CAJETA" info 2>/dev/null \
+    | awk '/^[[:space:]]*version:/{print $2; exit}' )"
+source_version="$(sed -n 's/.*version()[^"]*"\([^"]*\)".*/\1/p' \
+    "$here/src/main/cajeta/dev/cajeta/cloud/Cloud.cajeta" | head -1)"
+[[ -n "$manifest_version" && -n "$source_version" ]] \
+    || { echo "could not read both version strings to compare" >&2; exit 1; }
+[[ "$manifest_version" == "$source_version" ]] \
+    || { echo "VERSION DRIFT: cajeta.json says $manifest_version, Cloud.version() says $source_version" >&2; exit 1; }
+echo ">> manifest: version $manifest_version matches Cloud.version()"
+
 echo ">> building cloud library .cja"
 "$CAJETA" --emit=cja -o "$out/cloud.cja" \
     dev.cajeta.cloud.Cloud.run "$here/src/main/cajeta" "$out" >/dev/null
@@ -127,12 +141,5 @@ echo ">> building + running the test binary"
 
 "$out/ctests" \
     dev.cajeta.cloud.selftest.TestMain.run "$here/src/test/cajeta" "$out" >/dev/null
-
-# The HR Attrition reference matrices (gen_attrition.py -> build/attrition,
-# gitignored): AttritionTest asserts against the regenerated sklearn 1.9.0
-# pins when present and self-skips otherwise (hosted CI has no dataset).
-if [[ -d "$here/build/attrition" ]]; then
-    export ML_ATTRITION_DIR="$here/build/attrition"
-fi
 
 "$out/ctests"
