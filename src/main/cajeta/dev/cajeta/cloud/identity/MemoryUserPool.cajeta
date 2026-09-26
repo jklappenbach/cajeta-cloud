@@ -159,7 +159,7 @@ public final class MemoryUserPool implements UserPool {
         String code #= MemoryUserPool.freshCode(this.st.confirmation);
         boolean confirmed = !this.st.confirmation;
         LockGuard g #= this.st.lock.acquire();
-        if (this.st.idByName.containsKey(username)) {
+        if (this.st.subjectByName.containsKey(username)) {
             throw heap IdentityException(IdentityException.USER_EXISTS(),
                 "memory", operation, username, "username is taken");
         }
@@ -167,9 +167,9 @@ public final class MemoryUserPool implements UserPool {
         String idKey = "" + id;
         String nameKey = "" + username;
         String idValue = "" + id;
-        this.st.byId.put(#idKey, heap MemUser(id, username, confirmed,
+        this.st.bySubject.put(#idKey, heap MemUser(id, username, confirmed,
             #rec, #attrs, #code));
-        this.st.idByName.put(#nameKey, #idValue);
+        this.st.subjectByName.put(#nameKey, #idValue);
         RegistrationResult r = heap RegistrationResult(id, confirmed);
         return #r;
     }
@@ -184,14 +184,19 @@ public final class MemoryUserPool implements UserPool {
         return this.create(username, password, attributes, "registerWith");
     }
 
-    public void confirm(String userId, String code) {
-        this.requireCap(IdentityCapability.CONFIRMATION(), "confirm", userId);
+    public void confirm(String username, String code) {
+        this.requireCap(IdentityCapability.CONFIRMATION(), "confirm", username);
         LockGuard g #= this.st.lock.acquire();
-        MemUser u = this.st.find(userId, "confirm");
+        String subject = this.st.subjectByName.get(username);
+        if (subject == null) {
+            throw heap IdentityException(IdentityException.USER_NOT_FOUND(),
+                "memory", "confirm", username, "no such user");
+        }
+        MemUser u = this.st.find(subject, "confirm");
         if (u.confirmed) { return; }
         if (!u.code.equals(code)) {
             throw heap IdentityException(IdentityException.INVALID_CODE(),
-                "memory", "confirm", userId,
+                "memory", "confirm", username,
                 "confirmation code does not match");
         }
         u.confirmed = true;
@@ -207,19 +212,19 @@ public final class MemoryUserPool implements UserPool {
             groups.add(#g);
             i = i + 1;
         }
-        User out = heap User(u.id, u.username, u.confirmed, #attrs, #groups);
+        User out = heap User(u.subject, u.username, u.confirmed, #attrs, #groups);
         return #out;
     }
 
-    public #User lookupById(String userId) {
+    public #User lookupBySubject(String subject) {
         LockGuard g #= this.st.lock.acquire();
-        MemUser u = this.st.find(userId, "lookupById");
+        MemUser u = this.st.find(subject, "lookupBySubject");
         return MemoryUserPool.snapshot(u);
     }
 
     public #User lookupByName(String username) {
         LockGuard g #= this.st.lock.acquire();
-        String id = this.st.idByName.get(username);
+        String id = this.st.subjectByName.get(username);
         if (id == null) {
             throw heap IdentityException(IdentityException.USER_NOT_FOUND(),
                 "memory", "lookupByName", username, "no such user");
@@ -228,40 +233,40 @@ public final class MemoryUserPool implements UserPool {
         return MemoryUserPool.snapshot(u);
     }
 
-    public boolean delete(String userId) {
+    public boolean delete(String subject) {
         LockGuard g #= this.st.lock.acquire();
-        MemUser u = this.st.byId.get(userId);
+        MemUser u = this.st.bySubject.get(subject);
         if (u == null) { return false; }
         String name = "" + u.username;
-        String droppedId #= this.st.idByName.remove(name);
-        MemUser dropped #= this.st.byId.remove(userId);
+        String droppedId #= this.st.subjectByName.remove(name);
+        MemUser dropped #= this.st.bySubject.remove(subject);
         return true;
     }
 
-    public void setAttribute(String userId, String name, String value) {
+    public void setAttribute(String subject, String name, String value) {
         this.requireCap(IdentityCapability.CUSTOM_ATTRIBUTES(),
-            "setAttribute", userId);
-        MemoryUserPool.checkName(name, "setAttribute", userId);
+            "setAttribute", subject);
+        MemoryUserPool.checkName(name, "setAttribute", subject);
         LockGuard g #= this.st.lock.acquire();
-        MemUser u = this.st.find(userId, "setAttribute");
+        MemUser u = this.st.find(subject, "setAttribute");
         u.attrs.set(name, value);
         return;
     }
 
-    public void removeAttribute(String userId, String name) {
+    public void removeAttribute(String subject, String name) {
         this.requireCap(IdentityCapability.CUSTOM_ATTRIBUTES(),
-            "removeAttribute", userId);
+            "removeAttribute", subject);
         LockGuard g #= this.st.lock.acquire();
-        MemUser u = this.st.find(userId, "removeAttribute");
+        MemUser u = this.st.find(subject, "removeAttribute");
         boolean was = u.attrs.remove(name);
         return;
     }
 
-    public void addToGroup(String userId, String group) {
-        this.requireCap(IdentityCapability.GROUPS(), "addToGroup", userId);
-        MemoryUserPool.checkName(group, "addToGroup", userId);
+    public void addToGroup(String subject, String group) {
+        this.requireCap(IdentityCapability.GROUPS(), "addToGroup", subject);
+        MemoryUserPool.checkName(group, "addToGroup", subject);
         LockGuard g #= this.st.lock.acquire();
-        MemUser u = this.st.find(userId, "addToGroup");
+        MemUser u = this.st.find(subject, "addToGroup");
         if (u.groupIndex(group) < 0) {
             String copy = "" + group;
             u.groups.add(#copy);
@@ -269,11 +274,11 @@ public final class MemoryUserPool implements UserPool {
         return;
     }
 
-    public void removeFromGroup(String userId, String group) {
+    public void removeFromGroup(String subject, String group) {
         this.requireCap(IdentityCapability.GROUPS(), "removeFromGroup",
-            userId);
+            subject);
         LockGuard g #= this.st.lock.acquire();
-        MemUser u = this.st.find(userId, "removeFromGroup");
+        MemUser u = this.st.find(subject, "removeFromGroup");
         int32 at = u.groupIndex(group);
         if (at >= 0) {
             String dropped #= u.groups.removeAt(at);
@@ -281,10 +286,10 @@ public final class MemoryUserPool implements UserPool {
         return;
     }
 
-    public #String[] groups(String userId) {
-        this.requireCap(IdentityCapability.GROUPS(), "groups", userId);
+    public #String[] groups(String subject) {
+        this.requireCap(IdentityCapability.GROUPS(), "groups", subject);
         LockGuard g #= this.st.lock.acquire();
-        MemUser u = this.st.find(userId, "groups");
+        MemUser u = this.st.find(subject, "groups");
         int32 n = u.groups.count();
         String[] out = heap String[n];
         int32 i = 0;

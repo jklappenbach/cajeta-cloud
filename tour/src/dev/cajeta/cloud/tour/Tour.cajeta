@@ -178,10 +178,10 @@ public final class Tour {
         RegistrationResult r #= pool.register("ada", "correct horse battery");
         Tour.check(!r.confirmed(),
             "a fresh user is unconfirmed until the delivered code comes back");
-        String code #= pool.hooks().lastConfirmationCode(r.userId());
-        pool.confirm(r.userId(), code);
-        pool.addToGroup(r.userId(), "editors");
-        User ada #= pool.lookupById(r.userId());
+        String code #= pool.hooks().lastConfirmationCode(r.subject());
+        pool.confirm("ada", code);
+        pool.addToGroup(r.subject(), "editors");
+        User ada #= pool.lookupBySubject(r.subject());
         Tour.check(ada.confirmed() && ada.inGroup("editors"),
             "lookups reflect confirmation and group membership");
         int32 kind = -1;
@@ -192,7 +192,7 @@ public final class Tour {
         }
         Tour.check(kind == IdentityException.USER_EXISTS(),
             "a taken username conflicts, it never silently succeeds");
-        Tour.check(pool.hooks().passwordRecord(r.userId())
+        Tour.check(pool.hooks().passwordRecord(r.subject())
             .startsWith("sha256-salted$"),
             "the memory driver stores a salted, tagged hash, never the password");
         Tour.check(pool.capabilities().supports(

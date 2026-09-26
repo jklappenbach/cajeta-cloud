@@ -10,5 +10,5 @@ import cajeta.lang.String;
 public interface IdentityHooks {
 
     /** The last confirmation code delivered to the user, or user-not-found. */
-    #String lastConfirmationCode(String userId);
+    #String lastConfirmationCode(String subject);
 }

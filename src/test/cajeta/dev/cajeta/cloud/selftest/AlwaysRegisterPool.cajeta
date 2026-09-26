@@ -45,44 +45,44 @@ final class AlwaysRegisterPool implements UserPool {
             password, attributes);
     }
 
-    public void confirm(String userId, String code) {
-        this.inner.confirm(userId, code);
+    public void confirm(String username, String code) {
+        this.inner.confirm(username, code);
         return;
     }
 
-    public #User lookupById(String userId) {
-        return this.inner.lookupById(userId);
+    public #User lookupBySubject(String subject) {
+        return this.inner.lookupBySubject(subject);
     }
 
     public #User lookupByName(String username) {
         return this.inner.lookupByName(username);
     }
 
-    public boolean delete(String userId) {
-        return this.inner.delete(userId);
+    public boolean delete(String subject) {
+        return this.inner.delete(subject);
     }
 
-    public void setAttribute(String userId, String name, String value) {
-        this.inner.setAttribute(userId, name, value);
+    public void setAttribute(String subject, String name, String value) {
+        this.inner.setAttribute(subject, name, value);
         return;
     }
 
-    public void removeAttribute(String userId, String name) {
-        this.inner.removeAttribute(userId, name);
+    public void removeAttribute(String subject, String name) {
+        this.inner.removeAttribute(subject, name);
         return;
     }
 
-    public void addToGroup(String userId, String group) {
-        this.inner.addToGroup(userId, group);
+    public void addToGroup(String subject, String group) {
+        this.inner.addToGroup(subject, group);
         return;
     }
 
-    public void removeFromGroup(String userId, String group) {
-        this.inner.removeFromGroup(userId, group);
+    public void removeFromGroup(String subject, String group) {
+        this.inner.removeFromGroup(subject, group);
         return;
     }
 
-    public #String[] groups(String userId) {
-        return this.inner.groups(userId);
+    public #String[] groups(String subject) {
+        return this.inner.groups(subject);
     }
 }

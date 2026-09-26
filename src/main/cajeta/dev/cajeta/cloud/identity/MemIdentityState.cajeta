@@ -12,8 +12,8 @@ import cajeta.lang.String;
 final class MemIdentityState {
 
     Lock lock;
-    HashMap<String, MemUser> byId;
-    HashMap<String, String> idByName;
+    HashMap<String, MemUser> bySubject;
+    HashMap<String, String> subjectByName;
     boolean confirmation;
     boolean customAttributes;
     boolean groups;
@@ -21,8 +21,8 @@ final class MemIdentityState {
     MemIdentityState(boolean confirmation, boolean customAttributes,
                      boolean groups) {
         this.lock = heap Lock();
-        this.byId = heap HashMap<String, MemUser>();
-        this.idByName = heap HashMap<String, String>();
+        this.bySubject = heap HashMap<String, MemUser>();
+        this.subjectByName = heap HashMap<String, String>();
         this.confirmation = confirmation;
         this.customAttributes = customAttributes;
         this.groups = groups;
@@ -30,11 +30,11 @@ final class MemIdentityState {
     }
 
     /** Under the held lock: the user, or user-not-found. */
-    MemUser find(String userId, String operation) {
-        MemUser u = this.byId.get(userId);
+    MemUser find(String subject, String operation) {
+        MemUser u = this.bySubject.get(subject);
         if (u == null) {
             throw heap IdentityException(IdentityException.USER_NOT_FOUND(),
-                "memory", operation, userId, "no such user");
+                "memory", operation, subject, "no such user");
         }
         return #= u;
     }

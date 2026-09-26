@@ -71,8 +71,8 @@ public class IdentityTest {
         MemoryUserPool p = heap MemoryUserPool();
         RegistrationResult r1 #= p.register("grace", "correct horse battery");
         RegistrationResult r2 #= p.register("heidi", "correct horse battery");
-        String rec1 #= p.hooks().passwordRecord(r1.userId());
-        String rec2 #= p.hooks().passwordRecord(r2.userId());
+        String rec1 #= p.hooks().passwordRecord(r1.subject());
+        String rec2 #= p.hooks().passwordRecord(r2.subject());
         Assert.isTrue(rec1.startsWith("sha256-salted$"));
         Assert.isFalse(rec1.contains("correct horse battery"));
         Assert.isFalse(rec1.equals(rec2));
@@ -82,7 +82,7 @@ public class IdentityTest {
     public void confirmationCodeIsSixDigits() {
         MemoryUserPool p = heap MemoryUserPool();
         RegistrationResult r #= p.register("ivan", "correct horse battery");
-        String code #= p.hooks().lastConfirmationCode(r.userId());
+        String code #= p.hooks().lastConfirmationCode(r.subject());
         Assert.equals((int64) 6, code.count());
         int32 i = 0;
         while (i < 6) {
@@ -93,15 +93,15 @@ public class IdentityTest {
     }
 
     @Test
-    public void userIdsAreStableAndUnique() {
+    public void subjectsAreStableAndUnique() {
         MemoryUserPool p = heap MemoryUserPool();
         RegistrationResult r1 #= p.register("judy", "correct horse battery");
         RegistrationResult r2 #= p.register("kim", "correct horse battery");
-        Assert.isFalse(r1.userId().equals(r2.userId()));
-        p.setAttribute(r1.userId(), "locale", "fr");
-        p.addToGroup(r1.userId(), "staff");
+        Assert.isFalse(r1.subject().equals(r2.subject()));
+        p.setAttribute(r1.subject(), "locale", "fr");
+        p.addToGroup(r1.subject(), "staff");
         User u #= p.lookupByName("judy");
-        Assert.isTrue(u.id().equals(r1.userId()));
-        Assert.isTrue(p.lookupById(r2.userId()).username().equals("kim"));
+        Assert.isTrue(u.subject().equals(r1.subject()));
+        Assert.isTrue(p.lookupBySubject(r2.subject()).username().equals("kim"));
     }
 }

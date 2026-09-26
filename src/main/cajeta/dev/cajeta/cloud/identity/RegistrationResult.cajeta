@@ -3,21 +3,21 @@ package dev.cajeta.cloud.identity;
 import cajeta.lang.String;
 
 /**
- * What register returns (identity spec §3.1, §3.3): the new user's id
- * and whether the account is already confirmed.
+ * What register returns (identity spec §3.1, §3.3): the provider's subject
+ * for the new user and whether the account is already confirmed.
  */
 public final class RegistrationResult {
 
     String id;
     boolean isConfirmed;
 
-    public RegistrationResult(String userId, boolean confirmed) {
-        this.id = "" + userId;
+    public RegistrationResult(String subject, boolean confirmed) {
+        this.id = "" + subject;
         this.isConfirmed = confirmed;
         return;
     }
 
-    public #String userId() {
+    public #String subject() {
         String out = "" + this.id;
         return #out;
     }

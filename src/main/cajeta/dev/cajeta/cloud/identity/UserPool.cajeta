@@ -21,30 +21,30 @@ public interface UserPool {
     #RegistrationResult registerWith(String username, String password,
                                      Attributes attributes);
 
-    /** Complete an unconfirmed account with the delivered code (§3.3). */
-    void confirm(String userId, String code);
+    /** Complete an unconfirmed account with the delivered code; keyed by username like every public-plane call (§3.3, §14.1). */
+    void confirm(String username, String code);
 
-    /** The user, or user-not-found (§3.5). */
-    #User lookupById(String userId);
+    /** The user by the provider's subject, or user-not-found (§3.5). */
+    #User lookupBySubject(String subject);
 
     /** The user, or user-not-found (§3.5). */
     #User lookupByName(String username);
 
     /** Remove the account; false when the id was unknown (§3.6). */
-    boolean delete(String userId);
+    boolean delete(String subject);
 
     /** Set or replace one attribute whole (§7.2). */
-    void setAttribute(String userId, String name, String value);
+    void setAttribute(String subject, String name, String value);
 
     /** Remove one attribute whole; absent names are a no-op (§7.2). */
-    void removeAttribute(String userId, String name);
+    void removeAttribute(String subject, String name);
 
     /** Idempotent add (§7.3). */
-    void addToGroup(String userId, String group);
+    void addToGroup(String subject, String group);
 
     /** Idempotent remove (§7.3). */
-    void removeFromGroup(String userId, String group);
+    void removeFromGroup(String subject, String group);
 
     /** The user's group names (§7.4). */
-    #String[] groups(String userId);
+    #String[] groups(String subject);
 }

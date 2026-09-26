@@ -17,17 +17,17 @@ public final class MemoryIdentityHooks implements IdentityHooks {
         return;
     }
 
-    public #String lastConfirmationCode(String userId) {
+    public #String lastConfirmationCode(String subject) {
         LockGuard g #= this.st.lock.acquire();
-        MemUser u = this.st.find(userId, "lastConfirmationCode");
+        MemUser u = this.st.find(subject, "lastConfirmationCode");
         String out = "" + u.code;
         return #out;
     }
 
     /** The stored record: a format tag, the salt and the hash, never the password. */
-    public #String passwordRecord(String userId) {
+    public #String passwordRecord(String subject) {
         LockGuard g #= this.st.lock.acquire();
-        MemUser u = this.st.find(userId, "passwordRecord");
+        MemUser u = this.st.find(subject, "passwordRecord");
         String out = "" + u.passwordRecord;
         return #out;
     }

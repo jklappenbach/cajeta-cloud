@@ -56,9 +56,9 @@ public final class IdentityContract {
     static void registration(UserPool pool, String prefix) {
         RegistrationResult r #= pool.register(prefix + "alice",
             IdentityContract.password());
-        String id #= r.userId();
+        String id #= r.subject();
         IdentityContract.check(id.count() > 0, "register-id",
-            "register must return a non-empty user id");
+            "register must return a non-empty subject");
         int32 kind = -1;
         try {
             RegistrationResult never #= pool.register(prefix + "alice",
@@ -72,21 +72,21 @@ public final class IdentityContract {
             + "user-exists (§3.2); a driver that skips the uniqueness "
             + "check makes every registration test lie");
         User byName #= pool.lookupByName(prefix + "alice");
-        IdentityContract.check(byName.id().equals(id), "lookup-by-name",
-            "lookup by username must find the first registration's id");
-        User byId #= pool.lookupById(id);
-        IdentityContract.check(byId.username().equals(prefix + "alice"),
-            "lookup-by-id", "lookup by id must carry the username");
+        IdentityContract.check(byName.subject().equals(id), "lookup-by-name",
+            "lookup by username must find the first registration's subject");
+        User bySubject #= pool.lookupBySubject(id);
+        IdentityContract.check(bySubject.username().equals(prefix + "alice"),
+            "lookup-by-subject", "lookup by subject must carry the username");
         IdentityContract.check(pool.delete(id), "delete-reports",
             "delete must report the user existed");
         kind = -1;
         try {
-            User gone #= pool.lookupById(id);
+            User gone #= pool.lookupBySubject(id);
         } catch (IdentityException e) {
             kind = e.kind();
         }
         IdentityContract.check(kind == IdentityException.USER_NOT_FOUND(),
-            "delete-by-id", "a deleted user must be user-not-found by id");
+            "delete-by-subject", "a deleted user must be user-not-found by subject");
         kind = -1;
         try {
             User gone #= pool.lookupByName(prefix + "alice");
@@ -97,7 +97,7 @@ public final class IdentityContract {
             "delete-by-name",
             "a deleted user must be user-not-found by username");
         IdentityContract.check(!pool.delete(id), "delete-absent",
-            "delete of an unknown id must report absence");
+            "delete of an unknown subject must report absence");
         return;
     }
 
@@ -106,16 +106,16 @@ public final class IdentityContract {
         Capabilities caps = pool.capabilities();
         RegistrationResult r #= pool.register(prefix + "bob",
             IdentityContract.password());
-        String id #= r.userId();
+        String id #= r.subject();
         if (!caps.supports(IdentityCapability.CONFIRMATION())) {
             IdentityContract.check(r.confirmed(), "confirm-undeclared-created",
                 "without CONFIRMATION a user is confirmed on creation (§3.3)");
-            IdentityContract.check(pool.lookupById(id).confirmed(),
+            IdentityContract.check(pool.lookupBySubject(id).confirmed(),
                 "confirm-undeclared-lookup",
                 "without CONFIRMATION a lookup reports confirmed");
             int32 k = -1;
             try {
-                pool.confirm(id, "000000");
+                pool.confirm(prefix + "bob", "000000");
             } catch (IdentityException e) {
                 k = e.kind();
             }
@@ -128,7 +128,7 @@ public final class IdentityContract {
         }
         IdentityContract.check(!r.confirmed(), "confirm-fresh",
             "under CONFIRMATION a fresh user is unconfirmed");
-        IdentityContract.check(!pool.lookupById(id).confirmed(),
+        IdentityContract.check(!pool.lookupBySubject(id).confirmed(),
             "confirm-fresh-lookup", "a lookup reports the unconfirmed state");
         if (hooks == null) { return; }
         String code #= hooks.lastConfirmationCode(id);
@@ -136,17 +136,17 @@ public final class IdentityContract {
             "the driver hook must expose the delivered code (§3.7)");
         int32 kind = -1;
         try {
-            pool.confirm(id, code + "0");
+            pool.confirm(prefix + "bob", code + "0");
         } catch (IdentityException e) {
             kind = e.kind();
         }
         IdentityContract.check(kind == IdentityException.INVALID_CODE(),
             "confirm-wrong-code", "a wrong code must fail with invalid-code");
-        IdentityContract.check(!pool.lookupById(id).confirmed(),
+        IdentityContract.check(!pool.lookupBySubject(id).confirmed(),
             "confirm-wrong-leaves",
             "a wrong code must leave the user unconfirmed");
-        pool.confirm(id, code);
-        IdentityContract.check(pool.lookupById(id).confirmed(),
+        pool.confirm(prefix + "bob", code);
+        IdentityContract.check(pool.lookupBySubject(id).confirmed(),
             "confirm-right-code", "the delivered code must confirm the user");
         return;
     }
@@ -172,7 +172,7 @@ public final class IdentityContract {
                 IdentityContract.password());
             k = -1;
             try {
-                pool.setAttribute(r.userId(), "email", "x@example.test");
+                pool.setAttribute(r.subject(), "email", "x@example.test");
             } catch (IdentityException e) {
                 k = e.kind();
             }
@@ -184,23 +184,23 @@ public final class IdentityContract {
         }
         RegistrationResult r #= pool.registerWith(prefix + "carol",
             IdentityContract.password(), a);
-        String id #= r.userId();
-        User u1 #= pool.lookupById(id);
+        String id #= r.subject();
+        User u1 #= pool.lookupBySubject(id);
         IdentityContract.check(
             u1.attributes().get("email").equals("carol@example.test"),
             "attributes-registered",
             "attributes given at registration must come back on lookup");
         pool.setAttribute(id, "email", "carol@example.org");
-        User u2 #= pool.lookupById(id);
+        User u2 #= pool.lookupBySubject(id);
         IdentityContract.check(u2.attributes().count() == 1
             && u2.attributes().get("email").equals("carol@example.org"),
             "attributes-replace",
             "set of an existing name replaces the whole value (§7.2)");
         pool.setAttribute(id, "locale", "en");
-        IdentityContract.check(pool.lookupById(id).attributes().count() == 2,
+        IdentityContract.check(pool.lookupBySubject(id).attributes().count() == 2,
             "attributes-add", "set of a new name adds it");
         pool.removeAttribute(id, "email");
-        User u3 #= pool.lookupById(id);
+        User u3 #= pool.lookupBySubject(id);
         IdentityContract.check(u3.attributes().count() == 1
             && !u3.attributes().has("email"),
             "attributes-remove", "remove by name drops the whole attribute");
@@ -221,7 +221,7 @@ public final class IdentityContract {
         Capabilities caps = pool.capabilities();
         RegistrationResult r #= pool.register(prefix + "dave",
             IdentityContract.password());
-        String id #= r.userId();
+        String id #= r.subject();
         if (!caps.supports(IdentityCapability.GROUPS())) {
             int32 k = -1;
             try {
@@ -251,12 +251,12 @@ public final class IdentityContract {
         String[] g #= pool.groups(id);
         IdentityContract.check((int64) g.count() == 2, "groups-list",
             "add is idempotent and the list names each group once");
-        User u1 #= pool.lookupById(id);
+        User u1 #= pool.lookupBySubject(id);
         IdentityContract.check(u1.inGroup("admins") && u1.inGroup("staff")
             && u1.groupCount() == 2, "groups-lookup",
             "a lookup reflects group membership (§7.3)");
         pool.removeFromGroup(id, "admins");
-        User u2 #= pool.lookupById(id);
+        User u2 #= pool.lookupBySubject(id);
         IdentityContract.check(!u2.inGroup("admins") && u2.groupCount() == 1,
             "groups-remove", "remove drops the membership on lookup");
         IdentityContract.check((int64) pool.groups(id).count() == 1,
@@ -307,7 +307,7 @@ public final class IdentityContract {
         String fromBuffer = heap String(#bytes, name.byteLength());
         RegistrationResult r #= pool.register(fromBuffer,
             IdentityContract.password());
-        return r.userId();
+        return r.subject();
     }
 
     static #String junk(int32 len) {
@@ -329,7 +329,7 @@ public final class IdentityContract {
             churn.add(#j);
             i = i + 1;
         }
-        User u #= pool.lookupById(id);
+        User u #= pool.lookupBySubject(id);
         IdentityContract.check(u.username().equals(name),
             "buffer-independence",
             "the port must copy caller strings; a retained borrow reads "
@@ -342,15 +342,15 @@ public final class IdentityContract {
         int32 kind = -1;
         String msg = "";
         try {
-            User never #= pool.lookupById(prefix + "no-such-id");
+            User never #= pool.lookupBySubject(prefix + "no-such-id");
         } catch (IdentityException e) {
             kind = e.kind();
             msg = "" + e.message;
         }
         IdentityContract.check(kind == IdentityException.USER_NOT_FOUND(),
-            "error-not-found", "an unknown id must fail with user-not-found");
+            "error-not-found", "an unknown subject must fail with user-not-found");
         IdentityContract.check(msg.contains(provider)
-            && msg.contains("lookupById"), "error-names",
+            && msg.contains("lookupBySubject"), "error-names",
             "an error must name the provider and the operation (§11.3)");
         kind = -1;
         msg = "";

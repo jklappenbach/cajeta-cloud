@@ -4,21 +4,21 @@ import cajeta.collection.ArrayList;
 import cajeta.lang.String;
 
 /**
- * A user as a lookup returns it (identity spec §3.5): id, username,
+ * A user as a lookup returns it (identity spec §3.5): subject, username,
  * confirmation state, attributes and groups. The value is owned by the
  * caller and is a snapshot, never a window into driver state (§2.4).
  */
 public final class User {
 
-    String userId;
+    String subjectId;
     String userName;
     boolean isConfirmed;
     Attributes attrs;
     ArrayList<String> groupNames;
 
-    public User(String id, String username, boolean confirmed,
+    public User(String subject, String username, boolean confirmed,
                 #Attributes attributes, #ArrayList<String> groups) {
-        this.userId = "" + id;
+        this.subjectId = "" + subject;
         this.userName = "" + username;
         this.isConfirmed = confirmed;
         this.attrs #= attributes;
@@ -26,9 +26,9 @@ public final class User {
         return;
     }
 
-    /** The id, stable for the account's life (§3.1). */
-    public #String id() {
-        String out = "" + this.userId;
+    /** The provider's subject, stable for the account's life (§3.1); the application's own id is not this. */
+    public #String subject() {
+        String out = "" + this.subjectId;
         return #out;
     }
 

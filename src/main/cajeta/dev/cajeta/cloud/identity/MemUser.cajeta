@@ -6,7 +6,7 @@ import cajeta.lang.String;
 /** One account in the memory driver; only the driver touches it. */
 final class MemUser {
 
-    String id;
+    String subject;
     String username;
     boolean confirmed;
     String passwordRecord;
@@ -14,9 +14,9 @@ final class MemUser {
     ArrayList<String> groups;
     String code;
 
-    MemUser(String id, String username, boolean confirmed,
+    MemUser(String subject, String username, boolean confirmed,
             #String passwordRecord, #Attributes attrs, #String code) {
-        this.id = "" + id;
+        this.subject = "" + subject;
         this.username = "" + username;
         this.confirmed = confirmed;
         this.passwordRecord #= passwordRecord;

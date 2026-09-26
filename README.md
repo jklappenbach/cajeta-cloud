@@ -112,17 +112,22 @@ adapter's own credentials stay cross-cutting, the users an application
 registers are a port. `UserPool` covers the minimal cut: `register` and
 `registerWith` (user-exists on a taken name, policy-violation on a weak
 password, and the message never carries the password), `confirm` with a
-delivered code, `lookupById` / `lookupByName`, `delete`, whole-attribute
+delivered code, keyed by username, `lookupBySubject` / `lookupByName`,
+`delete`, whole-attribute
 `setAttribute` / `removeAttribute`, and `addToGroup` / `removeFromGroup`
 / `groups`. Every input is copied and every return is an owned snapshot,
-so a pooled request buffer is never retained (§2.3, §2.4). Every
+so a pooled request buffer is never retained (§2.3, §2.4). The id the
+port hands back is the provider's **subject**, the value that later appears
+in a token's `sub` claim. It is not the application's primary key: an
+application mints its own user id and stores the subject against it, so a
+provider change re-links subjects instead of rekeying the system. Every
 operation is atomic under concurrent use: two registrations of one
 username yield exactly one success (§2.5).
 
 ```cajeta
 UserPool pool = heap MemoryUserPool();               // any adapter here
 RegistrationResult r #= pool.register("ada", "correct horse battery");
-pool.confirm(r.userId(), codeFromEmail);
+pool.confirm("ada", codeFromEmail);
 User ada #= pool.lookupByName("ada");
 ```
 
