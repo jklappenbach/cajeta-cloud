@@ -1,0 +1,59 @@
+package dev.cajeta.cloud.identity;
+
+import cajeta.error.RecoverableException;
+import cajeta.lang.String;
+
+/**
+ * The identity error taxonomy (identity spec §11.1). Every failure
+ * carries a kind, and the message names the provider, the operation and
+ * the subject (a username or user id), never a password, a code, a
+ * secret or a raw token (§11.3).
+ */
+public class IdentityException extends RecoverableException {
+
+    public static int32 USER_NOT_FOUND()         { return 0; }
+    public static int32 USER_EXISTS()            { return 1; }
+    public static int32 INVALID_CREDENTIALS()    { return 2; }
+    public static int32 NOT_CONFIRMED()          { return 3; }
+    public static int32 CHALLENGE_REQUIRED()     { return 4; }
+    public static int32 INVALID_CODE()           { return 5; }
+    public static int32 CODE_EXPIRED()           { return 6; }
+    public static int32 LOCKED()                 { return 7; }
+    public static int32 INVALID_TOKEN()          { return 8; }
+    public static int32 POLICY_VIOLATION()       { return 9; }
+    public static int32 UNSUPPORTED_CAPABILITY() { return 10; }
+    public static int32 TRANSIENT()              { return 11; }
+    public static int32 PROVIDER_ERROR()         { return 12; }
+
+    int32 kindCode;
+    String providerName;
+    String operationName;
+
+    public IdentityException(int32 kind, String provider, String operation,
+                             String subject, String detail) {
+        this.kindCode = kind;
+        this.providerName = "" + provider;
+        this.operationName = "" + operation;
+        this.message = provider + ": " + operation + " '" + subject + "': "
+            + detail;
+        this.cause = 0;
+    }
+
+    /** The failure kind (see the constants). */
+    public int32 kind() { return this.kindCode; }
+
+    /** The adapter that failed. */
+    public #String provider() {
+        String out = "" + this.providerName;
+        return #out;
+    }
+
+    /** The port operation that failed. */
+    public #String operation() {
+        String out = "" + this.operationName;
+        return #out;
+    }
+
+    /** True when the parent retry policy applies (§11.2); sign-in never retries. */
+    public boolean isTransient() { return this.kindCode == 11; }
+}

@@ -1,0 +1,34 @@
+package dev.cajeta.cloud.identity;
+
+import cajeta.concurrent.LockGuard;
+import cajeta.lang.String;
+
+/**
+ * The memory driver's test seam (identity spec §3.7): the last
+ * confirmation code per user, and the stored password record so a test
+ * can assert its format tag without ever seeing a password.
+ */
+public final class MemoryIdentityHooks implements IdentityHooks {
+
+    MemIdentityState st;
+
+    MemoryIdentityHooks(MemIdentityState st) {
+        this.st #= st;
+        return;
+    }
+
+    public #String lastConfirmationCode(String userId) {
+        LockGuard g #= this.st.lock.acquire();
+        MemUser u = this.st.find(userId, "lastConfirmationCode");
+        String out = "" + u.code;
+        return #out;
+    }
+
+    /** The stored record: a format tag, the salt and the hash, never the password. */
+    public #String passwordRecord(String userId) {
+        LockGuard g #= this.st.lock.acquire();
+        MemUser u = this.st.find(userId, "passwordRecord");
+        String out = "" + u.passwordRecord;
+        return #out;
+    }
+}

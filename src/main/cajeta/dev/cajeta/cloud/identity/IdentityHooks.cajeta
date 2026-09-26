@@ -1,0 +1,14 @@
+package dev.cajeta.cloud.identity;
+
+import cajeta.lang.String;
+
+/**
+ * The driver-only test seam (identity spec §3.7, §10.5): the code a
+ * driver "sent", for tests. The memory driver implements it from its
+ * own state; an adapter supplies it through a provider test facility.
+ */
+public interface IdentityHooks {
+
+    /** The last confirmation code delivered to the user, or user-not-found. */
+    #String lastConfirmationCode(String userId);
+}

@@ -1,0 +1,88 @@
+package dev.cajeta.cloud.selftest;
+
+import cajeta.lang.String;
+import dev.cajeta.cloud.Capabilities;
+import dev.cajeta.cloud.identity.Attributes;
+import dev.cajeta.cloud.identity.MemoryIdentityHooks;
+import dev.cajeta.cloud.identity.MemoryUserPool;
+import dev.cajeta.cloud.identity.RegistrationResult;
+import dev.cajeta.cloud.identity.User;
+import dev.cajeta.cloud.identity.UserPool;
+
+/**
+ * A DELIBERATELY BROKEN adapter: register never checks uniqueness, so
+ * every registration of a taken username succeeds. The identity
+ * contract MUST fail this pool at register-duplicate; if it passes,
+ * the testkit is vacuous.
+ */
+final class AlwaysRegisterPool implements UserPool {
+
+    MemoryUserPool inner;
+    int64 serial;
+
+    AlwaysRegisterPool() {
+        this.inner = heap MemoryUserPool();
+        this.serial = (int64) 0;
+        return;
+    }
+
+    MemoryIdentityHooks hooks() { return this.inner.hooks(); }
+
+    public Capabilities capabilities() {
+        return this.inner.capabilities();
+    }
+
+    /** The lie: a taken username is quietly made unique. */
+    public #RegistrationResult register(String username, String password) {
+        this.serial = this.serial + 1;
+        return this.inner.register(username + "#" + this.serial, password);
+    }
+
+    public #RegistrationResult registerWith(String username, String password,
+                                            Attributes attributes) {
+        this.serial = this.serial + 1;
+        return this.inner.registerWith(username + "#" + this.serial,
+            password, attributes);
+    }
+
+    public void confirm(String userId, String code) {
+        this.inner.confirm(userId, code);
+        return;
+    }
+
+    public #User lookupById(String userId) {
+        return this.inner.lookupById(userId);
+    }
+
+    public #User lookupByName(String username) {
+        return this.inner.lookupByName(username);
+    }
+
+    public boolean delete(String userId) {
+        return this.inner.delete(userId);
+    }
+
+    public void setAttribute(String userId, String name, String value) {
+        this.inner.setAttribute(userId, name, value);
+        return;
+    }
+
+    public void removeAttribute(String userId, String name) {
+        this.inner.removeAttribute(userId, name);
+        return;
+    }
+
+    public void addToGroup(String userId, String group) {
+        this.inner.addToGroup(userId, group);
+        return;
+    }
+
+    public void removeFromGroup(String userId, String group) {
+        this.inner.removeFromGroup(userId, group);
+        return;
+    }
+
+    public #String[] groups(String userId) {
+        return this.inner.groups(userId);
+    }
+}

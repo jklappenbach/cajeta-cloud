@@ -1,0 +1,50 @@
+package dev.cajeta.cloud.identity;
+
+import cajeta.lang.String;
+import dev.cajeta.cloud.Capabilities;
+
+/**
+ * The user pool (identity spec §2.2, §3, §7): registration, confirmation,
+ * lookup, deletion, attributes and groups. Inputs are copied (§2.3),
+ * returns are owned (§2.4), and every operation is atomic under
+ * concurrent use (§2.5). Failures are {@link IdentityException}.
+ */
+public interface UserPool {
+
+    /** The adapter's declared identity capabilities (§8). */
+    Capabilities capabilities();
+
+    /** Create an account; user-exists when the username is taken (§3.1, §3.2). */
+    #RegistrationResult register(String username, String password);
+
+    /** Create an account with custom attributes; needs CUSTOM_ATTRIBUTES (§7.1). */
+    #RegistrationResult registerWith(String username, String password,
+                                     Attributes attributes);
+
+    /** Complete an unconfirmed account with the delivered code (§3.3). */
+    void confirm(String userId, String code);
+
+    /** The user, or user-not-found (§3.5). */
+    #User lookupById(String userId);
+
+    /** The user, or user-not-found (§3.5). */
+    #User lookupByName(String username);
+
+    /** Remove the account; false when the id was unknown (§3.6). */
+    boolean delete(String userId);
+
+    /** Set or replace one attribute whole (§7.2). */
+    void setAttribute(String userId, String name, String value);
+
+    /** Remove one attribute whole; absent names are a no-op (§7.2). */
+    void removeAttribute(String userId, String name);
+
+    /** Idempotent add (§7.3). */
+    void addToGroup(String userId, String group);
+
+    /** Idempotent remove (§7.3). */
+    void removeFromGroup(String userId, String group);
+
+    /** The user's group names (§7.4). */
+    #String[] groups(String userId);
+}

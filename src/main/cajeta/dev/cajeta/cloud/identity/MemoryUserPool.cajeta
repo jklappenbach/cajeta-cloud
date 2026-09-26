@@ -1,0 +1,297 @@
+package dev.cajeta.cloud.identity;
+
+import cajeta.codec.Base64;
+import cajeta.collection.ArrayList;
+import cajeta.concurrent.LockGuard;
+import cajeta.hash.Sha256;
+import cajeta.lang.Guid;
+import cajeta.lang.String;
+import dev.cajeta.cloud.Capabilities;
+
+/**
+ * The in-memory user pool (identity spec §1.3): the reference
+ * implementation and the default when no adapter is compiled in. It is
+ * faithful to the contract including its failures: a duplicate username
+ * conflicts under real concurrency, a wrong code is rejected, and a
+ * password is stored as a salted hash under a format tag (§4.7), never
+ * as the password. Confirmation codes are never delivered; the test
+ * seam {@link #hooks} exposes them (§3.7).
+ */
+public final class MemoryUserPool implements UserPool {
+
+    MemIdentityState st;
+    MemoryIdentityHooks hookSeam;
+    Capabilities caps;
+
+    public MemoryUserPool() {
+        this.init(true, true, true);
+        return;
+    }
+
+    /** A driver declaring only the given capabilities, for undeclared-branch tests. */
+    public static #MemoryUserPool withCapabilities(boolean confirmation,
+                                                   boolean customAttributes,
+                                                   boolean groups) {
+        MemoryUserPool p = heap MemoryUserPool();
+        p.init(confirmation, customAttributes, groups);
+        return #p;
+    }
+
+    void init(boolean confirmation, boolean customAttributes,
+              boolean groups) {
+        this.st #= heap MemIdentityState(confirmation, customAttributes,
+            groups);
+        this.hookSeam #= heap MemoryIdentityHooks(this.st);
+        Capabilities c = heap Capabilities("memory");
+        if (confirmation) {
+            c.declare(IdentityCapability.CONFIRMATION(),
+                "codes are exposed through MemoryIdentityHooks, never sent");
+        }
+        if (customAttributes) {
+            c.declare(IdentityCapability.CUSTOM_ATTRIBUTES(),
+                "names are 1 to 64 bytes without whitespace");
+        }
+        if (groups) {
+            c.declare(IdentityCapability.GROUPS(), "");
+        }
+        this.caps #= c;
+        return;
+    }
+
+    /** The test seam (§3.7). */
+    public MemoryIdentityHooks hooks() { return this.hookSeam; }
+
+    public Capabilities capabilities() { return this.caps; }
+
+    void requireCap(String capability, String operation, String subject) {
+        if (!this.caps.supports(capability)) {
+            throw heap IdentityException(
+                IdentityException.UNSUPPORTED_CAPABILITY(), "memory",
+                operation, subject, "capability '" + capability
+                + "' is not supported by adapter 'memory'");
+        }
+        return;
+    }
+
+    static void checkName(String name, String operation, String subject) {
+        int32 n = name.byteLength();
+        boolean ok = n >= 1 && n <= 64;
+        int32 i = 0;
+        while (ok && i < n) {
+            int8 b = name.byteAt(i);
+            if (b == (int8) 32 || b == (int8) 9 || b == (int8) 10
+                    || b == (int8) 13) {
+                ok = false;
+            }
+            i = i + 1;
+        }
+        if (!ok) {
+            throw heap IdentityException(
+                IdentityException.POLICY_VIOLATION(), "memory", operation,
+                subject, "attribute and group names are 1 to 64 bytes "
+                + "without whitespace");
+        }
+        return;
+    }
+
+    /** `sha256-salted$<salt>$<hash>`: the tag lets the hash change later without stranding users. */
+    static #String passwordRecord(String password) {
+        String saltText #= Guid.random().toString();
+        int8[] salt #= saltText.toBytes();
+        int8[] pw #= password.toBytes();
+        int64 saltLen = (int64) saltText.byteLength();
+        int64 pwLen = (int64) password.byteLength();
+        int8[] buf = heap int8[saltLen + pwLen];
+        int64 i = 0;
+        while (i < saltLen) { buf[i] = salt[i]; i = i + 1; }
+        i = 0;
+        while (i < pwLen) { buf[saltLen + i] = pw[i]; i = i + 1; }
+        int8[] digest #= Sha256.hash(buf, saltLen + pwLen);
+        String out #= "sha256-salted$" + saltText + "$"
+            + Base64.encode(digest, (int64) 32);
+        return #out;
+    }
+
+    static #String freshCode(boolean wanted) {
+        if (!wanted) {
+            String none = "";
+            return #none;
+        }
+        Guid g #= Guid.random();
+        int64 n = (int64) g.low();
+        if (n < 0) { n = -(n + 1); }
+        n = n % 1000000;
+        int8[] d = heap int8[6];
+        int32 i = 5;
+        while (i >= 0) {
+            d[i] = (int8) (48 + n % 10);
+            n = n / 10;
+            i = i - 1;
+        }
+        String out = heap String(#d, 6);
+        return #out;
+    }
+
+    #RegistrationResult create(String username, String password,
+                               Attributes attributes, String operation) {
+        if (username.byteLength() < 1) {
+            throw heap IdentityException(
+                IdentityException.POLICY_VIOLATION(), "memory", operation,
+                username, "username must not be empty");
+        }
+        if (password.byteLength() < 8) {
+            throw heap IdentityException(
+                IdentityException.POLICY_VIOLATION(), "memory", operation,
+                username, "password must be at least 8 bytes");
+        }
+        if (attributes.count() > 0) {
+            this.requireCap(IdentityCapability.CUSTOM_ATTRIBUTES(),
+                operation, username);
+            int32 i = 0;
+            while (i < attributes.count()) {
+                MemoryUserPool.checkName(attributes.nameAt(i), operation,
+                    username);
+                i = i + 1;
+            }
+        }
+        String rec #= MemoryUserPool.passwordRecord(password);
+        Attributes attrs #= attributes.copy();
+        String code #= MemoryUserPool.freshCode(this.st.confirmation);
+        boolean confirmed = !this.st.confirmation;
+        LockGuard g #= this.st.lock.acquire();
+        if (this.st.idByName.containsKey(username)) {
+            throw heap IdentityException(IdentityException.USER_EXISTS(),
+                "memory", operation, username, "username is taken");
+        }
+        String id #= Guid.random().toString();
+        String idKey = "" + id;
+        String nameKey = "" + username;
+        String idValue = "" + id;
+        this.st.byId.put(#idKey, heap MemUser(id, username, confirmed,
+            #rec, #attrs, #code));
+        this.st.idByName.put(#nameKey, #idValue);
+        RegistrationResult r = heap RegistrationResult(id, confirmed);
+        return #r;
+    }
+
+    public #RegistrationResult register(String username, String password) {
+        Attributes none = heap Attributes();
+        return this.create(username, password, none, "register");
+    }
+
+    public #RegistrationResult registerWith(String username, String password,
+                                            Attributes attributes) {
+        return this.create(username, password, attributes, "registerWith");
+    }
+
+    public void confirm(String userId, String code) {
+        this.requireCap(IdentityCapability.CONFIRMATION(), "confirm", userId);
+        LockGuard g #= this.st.lock.acquire();
+        MemUser u = this.st.find(userId, "confirm");
+        if (u.confirmed) { return; }
+        if (!u.code.equals(code)) {
+            throw heap IdentityException(IdentityException.INVALID_CODE(),
+                "memory", "confirm", userId,
+                "confirmation code does not match");
+        }
+        u.confirmed = true;
+        return;
+    }
+
+    static #User snapshot(MemUser u) {
+        Attributes attrs #= u.attrs.copy();
+        ArrayList<String> groups = heap ArrayList<String>();
+        int32 i = 0;
+        while (i < u.groups.count()) {
+            String g = "" + u.groups.get(i);
+            groups.add(#g);
+            i = i + 1;
+        }
+        User out = heap User(u.id, u.username, u.confirmed, #attrs, #groups);
+        return #out;
+    }
+
+    public #User lookupById(String userId) {
+        LockGuard g #= this.st.lock.acquire();
+        MemUser u = this.st.find(userId, "lookupById");
+        return MemoryUserPool.snapshot(u);
+    }
+
+    public #User lookupByName(String username) {
+        LockGuard g #= this.st.lock.acquire();
+        String id = this.st.idByName.get(username);
+        if (id == null) {
+            throw heap IdentityException(IdentityException.USER_NOT_FOUND(),
+                "memory", "lookupByName", username, "no such user");
+        }
+        MemUser u = this.st.find(id, "lookupByName");
+        return MemoryUserPool.snapshot(u);
+    }
+
+    public boolean delete(String userId) {
+        LockGuard g #= this.st.lock.acquire();
+        MemUser u = this.st.byId.get(userId);
+        if (u == null) { return false; }
+        String name = "" + u.username;
+        String droppedId #= this.st.idByName.remove(name);
+        MemUser dropped #= this.st.byId.remove(userId);
+        return true;
+    }
+
+    public void setAttribute(String userId, String name, String value) {
+        this.requireCap(IdentityCapability.CUSTOM_ATTRIBUTES(),
+            "setAttribute", userId);
+        MemoryUserPool.checkName(name, "setAttribute", userId);
+        LockGuard g #= this.st.lock.acquire();
+        MemUser u = this.st.find(userId, "setAttribute");
+        u.attrs.set(name, value);
+        return;
+    }
+
+    public void removeAttribute(String userId, String name) {
+        this.requireCap(IdentityCapability.CUSTOM_ATTRIBUTES(),
+            "removeAttribute", userId);
+        LockGuard g #= this.st.lock.acquire();
+        MemUser u = this.st.find(userId, "removeAttribute");
+        boolean was = u.attrs.remove(name);
+        return;
+    }
+
+    public void addToGroup(String userId, String group) {
+        this.requireCap(IdentityCapability.GROUPS(), "addToGroup", userId);
+        MemoryUserPool.checkName(group, "addToGroup", userId);
+        LockGuard g #= this.st.lock.acquire();
+        MemUser u = this.st.find(userId, "addToGroup");
+        if (u.groupIndex(group) < 0) {
+            String copy = "" + group;
+            u.groups.add(#copy);
+        }
+        return;
+    }
+
+    public void removeFromGroup(String userId, String group) {
+        this.requireCap(IdentityCapability.GROUPS(), "removeFromGroup",
+            userId);
+        LockGuard g #= this.st.lock.acquire();
+        MemUser u = this.st.find(userId, "removeFromGroup");
+        int32 at = u.groupIndex(group);
+        if (at >= 0) {
+            String dropped #= u.groups.removeAt(at);
+        }
+        return;
+    }
+
+    public #String[] groups(String userId) {
+        this.requireCap(IdentityCapability.GROUPS(), "groups", userId);
+        LockGuard g #= this.st.lock.acquire();
+        MemUser u = this.st.find(userId, "groups");
+        int32 n = u.groups.count();
+        String[] out = heap String[n];
+        int32 i = 0;
+        while (i < n) {
+            out[i] #= "" + u.groups.get(i);
+            i = i + 1;
+        }
+        return #out;
+    }
+}

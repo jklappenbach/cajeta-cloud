@@ -35,7 +35,7 @@
     "details": {
         "name":               "dev.cajeta.cloud",
         "version":            "0.1.1",
-        "description":        "cajeta-cloud — provider-neutral cloud ports: object store + stream, in-memory drivers, conformance testkits, capability negotiation",
+        "description":        "cajeta-cloud — provider-neutral cloud ports: object store + stream + identity, in-memory drivers, conformance testkits, capability negotiation",
         "license":            "Apache-2.0",
         "authors":            ["Julian Klappenbach"],
         "cajeta-lang-version": "1.0"

@@ -1,0 +1,91 @@
+package dev.cajeta.cloud.identity;
+
+import cajeta.collection.ArrayList;
+import cajeta.lang.String;
+
+/**
+ * Custom user attributes: an untyped string-to-string map (identity spec
+ * §7.1). Updates are whole-attribute, set or remove by name (§7.2).
+ * Every value stored is a copy, so a caller's buffer is never retained.
+ */
+public final class Attributes {
+
+    ArrayList<String> names;
+    ArrayList<String> values;
+
+    public Attributes() {
+        this.names = heap ArrayList<String>();
+        this.values = heap ArrayList<String>();
+        return;
+    }
+
+    int32 indexOf(String name) {
+        int32 i = 0;
+        while (i < this.names.count()) {
+            if (this.names.get(i).equals(name)) { return i; }
+            i = i + 1;
+        }
+        return -1;
+    }
+
+    /** Set an attribute, replacing the whole value of an existing name. */
+    public void set(String name, String value) {
+        int32 at = this.indexOf(name);
+        String v = "" + value;
+        if (at >= 0) {
+            this.values.set(at, #v);
+            return;
+        }
+        String n = "" + name;
+        this.names.add(#n);
+        this.values.add(#v);
+        return;
+    }
+
+    /** Remove by name; false when the name was absent. */
+    public boolean remove(String name) {
+        int32 at = this.indexOf(name);
+        if (at < 0) { return false; }
+        String n #= this.names.removeAt(at);
+        String v #= this.values.removeAt(at);
+        return true;
+    }
+
+    public boolean has(String name) {
+        return this.indexOf(name) >= 0;
+    }
+
+    /** The value, or "" when absent; use {@link #has} to tell them apart. */
+    public #String get(String name) {
+        int32 at = this.indexOf(name);
+        if (at < 0) {
+            String e = "";
+            return #e;
+        }
+        String out = "" + this.values.get(at);
+        return #out;
+    }
+
+    public int32 count() { return this.names.count(); }
+
+    public #String nameAt(int32 i) {
+        String out = "" + this.names.get(i);
+        return #out;
+    }
+
+    public #String valueAt(int32 i) {
+        String out = "" + this.values.get(i);
+        return #out;
+    }
+
+    /** An independent copy. */
+    public #Attributes copy() {
+        Attributes out = heap Attributes();
+        int32 i = 0;
+        while (i < this.names.count()) {
+            out.set(this.names.get(i), this.values.get(i));
+            i = i + 1;
+        }
+        return #out;
+    }
+}

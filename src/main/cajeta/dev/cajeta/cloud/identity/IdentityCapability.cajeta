@@ -1,0 +1,25 @@
+package dev.cajeta.cloud.identity;
+
+import cajeta.lang.String;
+
+/**
+ * Identity capability names (identity spec §8.1), declared through
+ * {@link dev.cajeta.cloud.Capabilities} like every other family.
+ * The minimal cut implements CONFIRMATION, CUSTOM_ATTRIBUTES and
+ * GROUPS; the rest are named here so adapters and the full cut share
+ * one vocabulary.
+ */
+public final class IdentityCapability {
+
+    public static #String CONFIRMATION()      { String s = "identity.confirmation";      return #s; }
+    public static #String TOTP()              { String s = "identity.totp";              return #s; }
+    public static #String SMS_OTP()           { String s = "identity.sms-otp";           return #s; }
+    public static #String EMAIL_OTP()         { String s = "identity.email-otp";         return #s; }
+    public static #String REFRESH()           { String s = "identity.refresh";           return #s; }
+    public static #String REVOCATION()        { String s = "identity.revocation";        return #s; }
+    public static #String CUSTOM_ATTRIBUTES() { String s = "identity.custom-attributes"; return #s; }
+    public static #String GROUPS()            { String s = "identity.groups";            return #s; }
+    public static #String JWKS()              { String s = "identity.jwks";              return #s; }
+    public static #String INTROSPECTION()     { String s = "identity.introspection";     return #s; }
+    public static #String PASSKEYS()          { String s = "identity.passkeys";          return #s; }
+}

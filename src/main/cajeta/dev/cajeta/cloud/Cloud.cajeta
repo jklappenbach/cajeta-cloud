@@ -8,8 +8,10 @@ package dev.cajeta.cloud;
  * artifact that implements a port and passes its conformance suite.
  *
  * Verticals in this release: the OBJECT-STORE port (§4–§8, including
- * the conditional writes cajeta-dqe's no-consensus design rests on)
- * and the STREAM port (§12, shaped against Kinesis and Kafka).
+ * the conditional writes cajeta-dqe's no-consensus design rests on),
+ * the STREAM port (§12, shaped against Kinesis and Kafka) and the
+ * minimal cut of the IDENTITY port (registration, confirmation,
+ * lookup, attributes, groups).
  *
  * This is the library entry class (the `--emit=cja` root).
  */

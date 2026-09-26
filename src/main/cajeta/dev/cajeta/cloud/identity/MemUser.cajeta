@@ -1,0 +1,37 @@
+package dev.cajeta.cloud.identity;
+
+import cajeta.collection.ArrayList;
+import cajeta.lang.String;
+
+/** One account in the memory driver; only the driver touches it. */
+final class MemUser {
+
+    String id;
+    String username;
+    boolean confirmed;
+    String passwordRecord;
+    Attributes attrs;
+    ArrayList<String> groups;
+    String code;
+
+    MemUser(String id, String username, boolean confirmed,
+            #String passwordRecord, #Attributes attrs, #String code) {
+        this.id = "" + id;
+        this.username = "" + username;
+        this.confirmed = confirmed;
+        this.passwordRecord #= passwordRecord;
+        this.attrs #= attrs;
+        this.groups = heap ArrayList<String>();
+        this.code #= code;
+        return;
+    }
+
+    int32 groupIndex(String group) {
+        int32 i = 0;
+        while (i < this.groups.count()) {
+            if (this.groups.get(i).equals(group)) { return i; }
+            i = i + 1;
+        }
+        return -1;
+    }
+}

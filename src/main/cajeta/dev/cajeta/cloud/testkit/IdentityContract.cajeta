@@ -1,0 +1,375 @@
+package dev.cajeta.cloud.testkit;
+
+import cajeta.collection.ArrayList;
+import cajeta.concurrent.AtomicInt64;
+import cajeta.lang.String;
+import dev.cajeta.cloud.Capabilities;
+import dev.cajeta.cloud.CloudException;
+import dev.cajeta.cloud.identity.Attributes;
+import dev.cajeta.cloud.identity.IdentityCapability;
+import dev.cajeta.cloud.identity.IdentityException;
+import dev.cajeta.cloud.identity.IdentityHooks;
+import dev.cajeta.cloud.identity.RegistrationResult;
+import dev.cajeta.cloud.identity.User;
+import dev.cajeta.cloud.identity.UserPool;
+
+/**
+ * The identity conformance suite (identity spec §10) over the minimal
+ * port: registration, confirmation, attributes, groups, concurrency,
+ * buffer independence and error shape. An adapter runs {@link #verify}
+ * with its pool, its delivered-code hook (null when it has none, §10.5)
+ * and a username prefix it may create under. A declared capability is
+ * tested and an undeclared one is asserted to fail cleanly (§10.2). A
+ * violation throws a CloudException whose operation field is the check
+ * id; no throw = conformant.
+ */
+public final class IdentityContract {
+
+    static void fail(String check, String detail) {
+        throw heap CloudException(CloudException.PROVIDER_ERROR(),
+            "contract", check, "-", detail);
+    }
+
+    static void check(boolean ok, String checkId, String detail) {
+        if (!ok) { IdentityContract.fail(checkId, detail); }
+        return;
+    }
+
+    static #String password() {
+        String p = "correct horse battery";
+        return #p;
+    }
+
+    /** Run the suite; throws on the first violation. */
+    public static void verify(UserPool pool, IdentityHooks hooks,
+                              String prefix) {
+        IdentityContract.registration(pool, prefix);
+        IdentityContract.confirmation(pool, hooks, prefix);
+        IdentityContract.attributes(pool, prefix);
+        IdentityContract.groups(pool, prefix);
+        IdentityContract.concurrentRegistration(pool, prefix);
+        IdentityContract.bufferIndependence(pool, prefix);
+        IdentityContract.errors(pool, prefix);
+        return;
+    }
+
+    static void registration(UserPool pool, String prefix) {
+        RegistrationResult r #= pool.register(prefix + "alice",
+            IdentityContract.password());
+        String id #= r.userId();
+        IdentityContract.check(id.count() > 0, "register-id",
+            "register must return a non-empty user id");
+        int32 kind = -1;
+        try {
+            RegistrationResult never #= pool.register(prefix + "alice",
+                IdentityContract.password());
+        } catch (IdentityException e) {
+            kind = e.kind();
+        }
+        IdentityContract.check(kind == IdentityException.USER_EXISTS(),
+            "register-duplicate",
+            "a second register of a taken username must fail with "
+            + "user-exists (§3.2); a driver that skips the uniqueness "
+            + "check makes every registration test lie");
+        User byName #= pool.lookupByName(prefix + "alice");
+        IdentityContract.check(byName.id().equals(id), "lookup-by-name",
+            "lookup by username must find the first registration's id");
+        User byId #= pool.lookupById(id);
+        IdentityContract.check(byId.username().equals(prefix + "alice"),
+            "lookup-by-id", "lookup by id must carry the username");
+        IdentityContract.check(pool.delete(id), "delete-reports",
+            "delete must report the user existed");
+        kind = -1;
+        try {
+            User gone #= pool.lookupById(id);
+        } catch (IdentityException e) {
+            kind = e.kind();
+        }
+        IdentityContract.check(kind == IdentityException.USER_NOT_FOUND(),
+            "delete-by-id", "a deleted user must be user-not-found by id");
+        kind = -1;
+        try {
+            User gone #= pool.lookupByName(prefix + "alice");
+        } catch (IdentityException e) {
+            kind = e.kind();
+        }
+        IdentityContract.check(kind == IdentityException.USER_NOT_FOUND(),
+            "delete-by-name",
+            "a deleted user must be user-not-found by username");
+        IdentityContract.check(!pool.delete(id), "delete-absent",
+            "delete of an unknown id must report absence");
+        return;
+    }
+
+    static void confirmation(UserPool pool, IdentityHooks hooks,
+                             String prefix) {
+        Capabilities caps = pool.capabilities();
+        RegistrationResult r #= pool.register(prefix + "bob",
+            IdentityContract.password());
+        String id #= r.userId();
+        if (!caps.supports(IdentityCapability.CONFIRMATION())) {
+            IdentityContract.check(r.confirmed(), "confirm-undeclared-created",
+                "without CONFIRMATION a user is confirmed on creation (§3.3)");
+            IdentityContract.check(pool.lookupById(id).confirmed(),
+                "confirm-undeclared-lookup",
+                "without CONFIRMATION a lookup reports confirmed");
+            int32 k = -1;
+            try {
+                pool.confirm(id, "000000");
+            } catch (IdentityException e) {
+                k = e.kind();
+            }
+            IdentityContract.check(
+                k == IdentityException.UNSUPPORTED_CAPABILITY(),
+                "confirm-undeclared",
+                "confirm without the capability must fail naming it, "
+                + "never succeed silently");
+            return;
+        }
+        IdentityContract.check(!r.confirmed(), "confirm-fresh",
+            "under CONFIRMATION a fresh user is unconfirmed");
+        IdentityContract.check(!pool.lookupById(id).confirmed(),
+            "confirm-fresh-lookup", "a lookup reports the unconfirmed state");
+        if (hooks == null) { return; }
+        String code #= hooks.lastConfirmationCode(id);
+        IdentityContract.check(code.count() > 0, "confirm-hook",
+            "the driver hook must expose the delivered code (§3.7)");
+        int32 kind = -1;
+        try {
+            pool.confirm(id, code + "0");
+        } catch (IdentityException e) {
+            kind = e.kind();
+        }
+        IdentityContract.check(kind == IdentityException.INVALID_CODE(),
+            "confirm-wrong-code", "a wrong code must fail with invalid-code");
+        IdentityContract.check(!pool.lookupById(id).confirmed(),
+            "confirm-wrong-leaves",
+            "a wrong code must leave the user unconfirmed");
+        pool.confirm(id, code);
+        IdentityContract.check(pool.lookupById(id).confirmed(),
+            "confirm-right-code", "the delivered code must confirm the user");
+        return;
+    }
+
+    static void attributes(UserPool pool, String prefix) {
+        Capabilities caps = pool.capabilities();
+        Attributes a = heap Attributes();
+        a.set("email", "carol@example.test");
+        if (!caps.supports(IdentityCapability.CUSTOM_ATTRIBUTES())) {
+            int32 k = -1;
+            try {
+                RegistrationResult never #= pool.registerWith(
+                    prefix + "carol", IdentityContract.password(), a);
+            } catch (IdentityException e) {
+                k = e.kind();
+            }
+            IdentityContract.check(
+                k == IdentityException.UNSUPPORTED_CAPABILITY(),
+                "attributes-undeclared-register",
+                "registering with attributes without the capability "
+                + "must fail naming it");
+            RegistrationResult r #= pool.register(prefix + "carol",
+                IdentityContract.password());
+            k = -1;
+            try {
+                pool.setAttribute(r.userId(), "email", "x@example.test");
+            } catch (IdentityException e) {
+                k = e.kind();
+            }
+            IdentityContract.check(
+                k == IdentityException.UNSUPPORTED_CAPABILITY(),
+                "attributes-undeclared-set",
+                "setAttribute without the capability must fail naming it");
+            return;
+        }
+        RegistrationResult r #= pool.registerWith(prefix + "carol",
+            IdentityContract.password(), a);
+        String id #= r.userId();
+        User u1 #= pool.lookupById(id);
+        IdentityContract.check(
+            u1.attributes().get("email").equals("carol@example.test"),
+            "attributes-registered",
+            "attributes given at registration must come back on lookup");
+        pool.setAttribute(id, "email", "carol@example.org");
+        User u2 #= pool.lookupById(id);
+        IdentityContract.check(u2.attributes().count() == 1
+            && u2.attributes().get("email").equals("carol@example.org"),
+            "attributes-replace",
+            "set of an existing name replaces the whole value (§7.2)");
+        pool.setAttribute(id, "locale", "en");
+        IdentityContract.check(pool.lookupById(id).attributes().count() == 2,
+            "attributes-add", "set of a new name adds it");
+        pool.removeAttribute(id, "email");
+        User u3 #= pool.lookupById(id);
+        IdentityContract.check(u3.attributes().count() == 1
+            && !u3.attributes().has("email"),
+            "attributes-remove", "remove by name drops the whole attribute");
+        int32 kind = -1;
+        try {
+            pool.setAttribute(id, "", "x");
+        } catch (IdentityException e) {
+            kind = e.kind();
+        }
+        IdentityContract.check(kind == IdentityException.POLICY_VIOLATION(),
+            "attributes-policy",
+            "an attribute name the provider rejects (the empty name) must "
+            + "fail with policy-violation (§7.1)");
+        return;
+    }
+
+    static void groups(UserPool pool, String prefix) {
+        Capabilities caps = pool.capabilities();
+        RegistrationResult r #= pool.register(prefix + "dave",
+            IdentityContract.password());
+        String id #= r.userId();
+        if (!caps.supports(IdentityCapability.GROUPS())) {
+            int32 k = -1;
+            try {
+                pool.addToGroup(id, "admins");
+            } catch (IdentityException e) {
+                k = e.kind();
+            }
+            IdentityContract.check(
+                k == IdentityException.UNSUPPORTED_CAPABILITY(),
+                "groups-undeclared-add",
+                "addToGroup without the capability must fail naming it");
+            k = -1;
+            try {
+                String[] never #= pool.groups(id);
+            } catch (IdentityException e) {
+                k = e.kind();
+            }
+            IdentityContract.check(
+                k == IdentityException.UNSUPPORTED_CAPABILITY(),
+                "groups-undeclared-list",
+                "groups without the capability must fail naming it");
+            return;
+        }
+        pool.addToGroup(id, "admins");
+        pool.addToGroup(id, "staff");
+        pool.addToGroup(id, "staff");
+        String[] g #= pool.groups(id);
+        IdentityContract.check((int64) g.count() == 2, "groups-list",
+            "add is idempotent and the list names each group once");
+        User u1 #= pool.lookupById(id);
+        IdentityContract.check(u1.inGroup("admins") && u1.inGroup("staff")
+            && u1.groupCount() == 2, "groups-lookup",
+            "a lookup reflects group membership (§7.3)");
+        pool.removeFromGroup(id, "admins");
+        User u2 #= pool.lookupById(id);
+        IdentityContract.check(!u2.inGroup("admins") && u2.groupCount() == 1,
+            "groups-remove", "remove drops the membership on lookup");
+        IdentityContract.check((int64) pool.groups(id).count() == 1,
+            "groups-list-after-remove", "the list reflects the removal");
+        return;
+    }
+
+    static async void racer(UserPool pool, AtomicInt64 wins,
+                            AtomicInt64 conflicts, String username) {
+        try {
+            RegistrationResult r #= pool.register(username,
+                IdentityContract.password());
+            wins.fetchAdd((int64) 1);
+        } catch (IdentityException e) {
+            if (e.kind() == IdentityException.USER_EXISTS()) {
+                conflicts.fetchAdd((int64) 1);
+            }
+        }
+        return;
+    }
+
+    /** §10.3: REAL concurrent registrations of one username; one may win. */
+    static void concurrentRegistration(UserPool pool, String prefix) {
+        AtomicInt64 wins = heap AtomicInt64((int64) 0);
+        AtomicInt64 conflicts = heap AtomicInt64((int64) 0);
+        String name = prefix + "race";
+        scope {
+            spawn racer(pool, wins, conflicts, name);
+            spawn racer(pool, wins, conflicts, name);
+            spawn racer(pool, wins, conflicts, name);
+            spawn racer(pool, wins, conflicts, name);
+            spawn racer(pool, wins, conflicts, name);
+            spawn racer(pool, wins, conflicts, name);
+            spawn racer(pool, wins, conflicts, name);
+            spawn racer(pool, wins, conflicts, name);
+        }
+        IdentityContract.check(wins.load() == 1 && conflicts.load() == 7,
+            "register-one-winner",
+            "exactly ONE of 8 concurrent registrations of one username "
+            + "may succeed and the other 7 must see user-exists (§2.5, "
+            + "§10.3); observed " + wins.load() + " wins, "
+            + conflicts.load() + " conflicts");
+        return;
+    }
+
+    static #String registerFromScratchBuffer(UserPool pool, String name) {
+        int8[] bytes #= name.toBytes();
+        String fromBuffer = heap String(#bytes, name.byteLength());
+        RegistrationResult r #= pool.register(fromBuffer,
+            IdentityContract.password());
+        return r.userId();
+    }
+
+    static #String junk(int32 len) {
+        int8[] b = heap int8[(int64) len];
+        int64 i = 0;
+        while (i < (int64) len) { b[i] = (int8) 122; i = i + 1; }
+        String s = heap String(#b, len);
+        return #s;
+    }
+
+    /** §2.3, §13.7: the caller's buffer dies and is reused; the user is unaffected. */
+    static void bufferIndependence(UserPool pool, String prefix) {
+        String name = prefix + "erin";
+        String id #= IdentityContract.registerFromScratchBuffer(pool, name);
+        ArrayList<String> churn = heap ArrayList<String>();
+        int32 i = 0;
+        while (i < 64) {
+            String j #= IdentityContract.junk(name.byteLength());
+            churn.add(#j);
+            i = i + 1;
+        }
+        User u #= pool.lookupById(id);
+        IdentityContract.check(u.username().equals(name),
+            "buffer-independence",
+            "the port must copy caller strings; a retained borrow reads "
+            + "reused memory once the caller's buffer is gone (§2.3)");
+        return;
+    }
+
+    static void errors(UserPool pool, String prefix) {
+        String provider #= pool.capabilities().adapterName();
+        int32 kind = -1;
+        String msg = "";
+        try {
+            User never #= pool.lookupById(prefix + "no-such-id");
+        } catch (IdentityException e) {
+            kind = e.kind();
+            msg = "" + e.message;
+        }
+        IdentityContract.check(kind == IdentityException.USER_NOT_FOUND(),
+            "error-not-found", "an unknown id must fail with user-not-found");
+        IdentityContract.check(msg.contains(provider)
+            && msg.contains("lookupById"), "error-names",
+            "an error must name the provider and the operation (§11.3)");
+        kind = -1;
+        msg = "";
+        try {
+            RegistrationResult never #= pool.register(prefix + "frank",
+                "zq1");
+        } catch (IdentityException e) {
+            kind = e.kind();
+            msg = "" + e.message;
+        }
+        IdentityContract.check(kind == IdentityException.POLICY_VIOLATION(),
+            "error-policy",
+            "a password below the provider's policy must fail with "
+            + "policy-violation (§3.4)");
+        IdentityContract.check(!msg.contains("zq1"), "error-no-password",
+            "a policy error must never contain the password (§11.3)");
+        IdentityContract.check(msg.contains(provider)
+            && msg.contains("register"), "error-policy-names",
+            "a policy error names the provider and the operation");
+        return;
+    }
+}

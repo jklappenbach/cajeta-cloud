@@ -1,0 +1,41 @@
+package dev.cajeta.cloud.identity;
+
+import cajeta.collection.HashMap;
+import cajeta.concurrent.Lock;
+import cajeta.lang.String;
+
+/**
+ * The memory driver's shared guts, held by both the pool and its hooks
+ * so neither references the interface-implementing class (the MemState
+ * pattern). One lock guards every operation (identity spec §2.5).
+ */
+final class MemIdentityState {
+
+    Lock lock;
+    HashMap<String, MemUser> byId;
+    HashMap<String, String> idByName;
+    boolean confirmation;
+    boolean customAttributes;
+    boolean groups;
+
+    MemIdentityState(boolean confirmation, boolean customAttributes,
+                     boolean groups) {
+        this.lock = heap Lock();
+        this.byId = heap HashMap<String, MemUser>();
+        this.idByName = heap HashMap<String, String>();
+        this.confirmation = confirmation;
+        this.customAttributes = customAttributes;
+        this.groups = groups;
+        return;
+    }
+
+    /** Under the held lock: the user, or user-not-found. */
+    MemUser find(String userId, String operation) {
+        MemUser u = this.byId.get(userId);
+        if (u == null) {
+            throw heap IdentityException(IdentityException.USER_NOT_FOUND(),
+                "memory", operation, userId, "no such user");
+        }
+        return #= u;
+    }
+}

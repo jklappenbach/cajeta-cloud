@@ -1,0 +1,60 @@
+package dev.cajeta.cloud.identity;
+
+import cajeta.collection.ArrayList;
+import cajeta.lang.String;
+
+/**
+ * A user as a lookup returns it (identity spec §3.5): id, username,
+ * confirmation state, attributes and groups. The value is owned by the
+ * caller and is a snapshot, never a window into driver state (§2.4).
+ */
+public final class User {
+
+    String userId;
+    String userName;
+    boolean isConfirmed;
+    Attributes attrs;
+    ArrayList<String> groupNames;
+
+    public User(String id, String username, boolean confirmed,
+                #Attributes attributes, #ArrayList<String> groups) {
+        this.userId = "" + id;
+        this.userName = "" + username;
+        this.isConfirmed = confirmed;
+        this.attrs #= attributes;
+        this.groupNames #= groups;
+        return;
+    }
+
+    /** The id, stable for the account's life (§3.1). */
+    public #String id() {
+        String out = "" + this.userId;
+        return #out;
+    }
+
+    public #String username() {
+        String out = "" + this.userName;
+        return #out;
+    }
+
+    public boolean confirmed() { return this.isConfirmed; }
+
+    /** The attributes, a view into this snapshot. */
+    public Attributes attributes() { return this.attrs; }
+
+    public int32 groupCount() { return this.groupNames.count(); }
+
+    public #String groupAt(int32 i) {
+        String out = "" + this.groupNames.get(i);
+        return #out;
+    }
+
+    public boolean inGroup(String group) {
+        int32 i = 0;
+        while (i < this.groupNames.count()) {
+            if (this.groupNames.get(i).equals(group)) { return true; }
+            i = i + 1;
+        }
+        return false;
+    }
+}

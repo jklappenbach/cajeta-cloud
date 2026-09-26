@@ -5,6 +5,11 @@ import dev.cajeta.cloud.Caps;
 import dev.cajeta.cloud.CloudException;
 import dev.cajeta.cloud.Credentials;
 import dev.cajeta.cloud.RetryPolicy;
+import dev.cajeta.cloud.identity.IdentityCapability;
+import dev.cajeta.cloud.identity.IdentityException;
+import dev.cajeta.cloud.identity.MemoryUserPool;
+import dev.cajeta.cloud.identity.RegistrationResult;
+import dev.cajeta.cloud.identity.User;
 import dev.cajeta.cloud.object.CondResult;
 import dev.cajeta.cloud.object.ListPage;
 import dev.cajeta.cloud.object.MemoryObjectStore;
@@ -14,6 +19,7 @@ import dev.cajeta.cloud.stream.MemoryStream;
 import dev.cajeta.cloud.stream.StartAt;
 import dev.cajeta.cloud.stream.StreamCursor;
 import dev.cajeta.cloud.stream.SubStreamInfo;
+import dev.cajeta.cloud.testkit.IdentityContract;
 import dev.cajeta.cloud.testkit.ObjectStoreContract;
 
 /**
@@ -166,6 +172,38 @@ public final class Tour {
         return;
     }
 
+    static void identityPassage() {
+        System.stdout.println("passage: identity");
+        MemoryUserPool pool = heap MemoryUserPool();
+        RegistrationResult r #= pool.register("ada", "correct horse battery");
+        Tour.check(!r.confirmed(),
+            "a fresh user is unconfirmed until the delivered code comes back");
+        String code #= pool.hooks().lastConfirmationCode(r.userId());
+        pool.confirm(r.userId(), code);
+        pool.addToGroup(r.userId(), "editors");
+        User ada #= pool.lookupById(r.userId());
+        Tour.check(ada.confirmed() && ada.inGroup("editors"),
+            "lookups reflect confirmation and group membership");
+        int32 kind = -1;
+        try {
+            RegistrationResult never #= pool.register("ada", "another passphrase");
+        } catch (IdentityException e) {
+            kind = e.kind();
+        }
+        Tour.check(kind == IdentityException.USER_EXISTS(),
+            "a taken username conflicts, it never silently succeeds");
+        Tour.check(pool.hooks().passwordRecord(r.userId())
+            .startsWith("sha256-salted$"),
+            "the memory driver stores a salted, tagged hash, never the password");
+        Tour.check(pool.capabilities().supports(
+            IdentityCapability.CONFIRMATION()),
+            "identity capabilities are declared like every other family");
+        IdentityContract.verify(pool, pool.hooks(), "tour-");
+        Tour.check(true,
+            "the identity conformance testkit passes the in-memory driver");
+        return;
+    }
+
     public static int32 main() {
         System.stdout.println("dev.cajeta.cloud tour");
         Tour.objectPassage();
@@ -173,6 +211,7 @@ public final class Tour {
         Tour.capabilityPassage();
         Tour.streamPassage();
         Tour.operationsPassage();
+        Tour.identityPassage();
         if (Tour.failures > 0) {
             System.stdout.println("FAILURES: " + (int64) Tour.failures);
             return 1;

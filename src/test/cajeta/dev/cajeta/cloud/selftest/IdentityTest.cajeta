@@ -1,0 +1,107 @@
+package dev.cajeta.cloud.selftest;
+
+import cajeta.lang.String;
+import dev.cajeta.unit.Assert;
+import dev.cajeta.cloud.Capabilities;
+import dev.cajeta.cloud.CloudException;
+import dev.cajeta.cloud.identity.IdentityCapability;
+import dev.cajeta.cloud.identity.MemoryUserPool;
+import dev.cajeta.cloud.identity.RegistrationResult;
+import dev.cajeta.cloud.identity.User;
+import dev.cajeta.cloud.testkit.IdentityContract;
+
+/**
+ * cajeta-cloud-identity Unit 1: the conformance suite passes the memory
+ * driver (1.1.1 to 1.1.8), takes its undeclared branches against a driver
+ * declaring nothing, and catches a driver that skips the uniqueness check
+ * (1.3.1). The memory driver's own guarantees follow: declarations,
+ * salted and tagged password storage (1.2.3), six-digit codes, stable ids.
+ */
+public class IdentityTest {
+
+    public IdentityTest() { return; }
+
+    @Test
+    public void contractPassesTheMemoryDriver() {
+        MemoryUserPool p = heap MemoryUserPool();
+        IdentityContract.verify(p, p.hooks(), "tk-");
+    }
+
+    @Test
+    public void undeclaredCapabilitiesFailCleanly() {
+        MemoryUserPool p #= MemoryUserPool.withCapabilities(false, false,
+            false);
+        IdentityContract.verify(p, p.hooks(), "tk-min-");
+    }
+
+    @Test
+    public void contractWithoutAHookSkipsOnlyTheCodeCases() {
+        MemoryUserPool p = heap MemoryUserPool();
+        IdentityContract.verify(p, null, "tk-nohook-");
+    }
+
+    @Test
+    public void skippedUniquenessIsCaught() {
+        AlwaysRegisterPool p = heap AlwaysRegisterPool();
+        boolean threw = false;
+        try {
+            IdentityContract.verify(p, p.hooks(), "tk-liar-");
+        } catch (CloudException e) {
+            threw = true;
+            Assert.isTrue(e.message.contains("register-duplicate"));
+        }
+        Assert.isTrue(threw);
+    }
+
+    @Test
+    public void memoryDriverDeclarations() {
+        MemoryUserPool p = heap MemoryUserPool();
+        Capabilities c = p.capabilities();
+        Assert.isTrue(c.supports(IdentityCapability.CONFIRMATION()));
+        Assert.isTrue(c.supports(IdentityCapability.CUSTOM_ATTRIBUTES()));
+        Assert.isTrue(c.supports(IdentityCapability.GROUPS()));
+        Assert.isFalse(c.supports(IdentityCapability.TOTP()));
+        Assert.isFalse(c.supports(IdentityCapability.JWKS()));
+        Assert.isFalse(c.supports(IdentityCapability.PASSKEYS()));
+        Assert.isTrue(c.adapterName().equals("memory"));
+    }
+
+    @Test
+    public void passwordIsStoredSaltedAndTagged() {
+        MemoryUserPool p = heap MemoryUserPool();
+        RegistrationResult r1 #= p.register("grace", "correct horse battery");
+        RegistrationResult r2 #= p.register("heidi", "correct horse battery");
+        String rec1 #= p.hooks().passwordRecord(r1.userId());
+        String rec2 #= p.hooks().passwordRecord(r2.userId());
+        Assert.isTrue(rec1.startsWith("sha256-salted$"));
+        Assert.isFalse(rec1.contains("correct horse battery"));
+        Assert.isFalse(rec1.equals(rec2));
+    }
+
+    @Test
+    public void confirmationCodeIsSixDigits() {
+        MemoryUserPool p = heap MemoryUserPool();
+        RegistrationResult r #= p.register("ivan", "correct horse battery");
+        String code #= p.hooks().lastConfirmationCode(r.userId());
+        Assert.equals((int64) 6, code.count());
+        int32 i = 0;
+        while (i < 6) {
+            Assert.isTrue(code.byteAt(i) >= (int8) 48
+                && code.byteAt(i) <= (int8) 57);
+            i = i + 1;
+        }
+    }
+
+    @Test
+    public void userIdsAreStableAndUnique() {
+        MemoryUserPool p = heap MemoryUserPool();
+        RegistrationResult r1 #= p.register("judy", "correct horse battery");
+        RegistrationResult r2 #= p.register("kim", "correct horse battery");
+        Assert.isFalse(r1.userId().equals(r2.userId()));
+        p.setAttribute(r1.userId(), "locale", "fr");
+        p.addToGroup(r1.userId(), "staff");
+        User u #= p.lookupByName("judy");
+        Assert.isTrue(u.id().equals(r1.userId()));
+        Assert.isTrue(p.lookupById(r2.userId()).username().equals("kim"));
+    }
+}

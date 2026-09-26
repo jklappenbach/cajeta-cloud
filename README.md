@@ -31,9 +31,9 @@ not one**: a queue deletes on acknowledge and redelivers on timeout; a
 topic fans out to independent subscriptions; a stream is an ordered,
 replayable log consumed by position. Collapsing them would force each
 to lie about ordering, replay, or fan-out — precisely the properties
-consumers build on. This release ships **object store** (§4–§8) and
-**stream** (§12); queue/topic/KV/SQL/cache ports come later, as their
-own packages.
+consumers build on. This release ships **object store** (§4–§8), **stream** (§12) and the
+minimal cut of **identity** (the identity addendum, §3 and §7);
+queue/topic/KV/SQL/cache ports come later, as their own packages.
 
 Local/on-prem backends (filesystem object store, an embedded queue)
 are a **separate, uncommitted release** (§1.5) — they would drag
@@ -105,6 +105,36 @@ genuinely share — the shape was verified against the Kinesis API
 hook closes a sub-stream and registers two successors so §12.3 is
 testable without a Kinesis account.
 
+## The identity port — `dev.cajeta.cloud.identity`
+
+End-user identity is a family of its own (identity addendum §1.2): an
+adapter's own credentials stay cross-cutting, the users an application
+registers are a port. `UserPool` covers the minimal cut: `register` and
+`registerWith` (user-exists on a taken name, policy-violation on a weak
+password, and the message never carries the password), `confirm` with a
+delivered code, `lookupById` / `lookupByName`, `delete`, whole-attribute
+`setAttribute` / `removeAttribute`, and `addToGroup` / `removeFromGroup`
+/ `groups`. Every input is copied and every return is an owned snapshot,
+so a pooled request buffer is never retained (§2.3, §2.4). Every
+operation is atomic under concurrent use: two registrations of one
+username yield exactly one success (§2.5).
+
+```cajeta
+UserPool pool = heap MemoryUserPool();               // any adapter here
+RegistrationResult r #= pool.register("ada", "correct horse battery");
+pool.confirm(r.userId(), codeFromEmail);
+User ada #= pool.lookupByName("ada");
+```
+
+`MemoryUserPool` is the reference implementation and the default when
+no adapter is compiled in. It stores a salted hash under a format tag
+(`sha256-salted$salt$hash` today, PBKDF2-SHA256 once the toolchain that
+ships `cajeta.hash.Pbkdf2` is pinned), never a password, and it never
+fakes a delivery channel: the confirmation code a test needs comes from
+`MemoryUserPool.hooks()` (§3.7). Failures are `IdentityException` with
+one of the §11.1 kinds. Authentication, challenges and tokens are the
+full cut and follow with primavera's security phase.
+
 ## Capability negotiation — `Capabilities` / `Caps`
 
 A definitive answer **before** any operation (§3). Partial support is
@@ -137,6 +167,10 @@ lacking it would surface as data corruption, not a startup error.
 | `stream.log-compaction` | — | no | Kafka only (§12.7) |
 | `stream.transactional-produce` | — | no | Kafka only (§12.7) |
 | `stream.consumer-groups` | — | no | Kafka only (§12.7) |
+| `identity.confirmation` | yes (code via hooks) | — | Cognito adapter |
+| `identity.custom-attributes` | yes | — | Cognito adapter |
+| `identity.groups` | yes | — | Cognito adapter |
+| `identity.totp` / `sms-otp` / `email-otp` / `refresh` / `revocation` / `jwks` | full cut | — | Cognito adapter |
 
 ## The conformance testkit — `dev.cajeta.cloud.testkit`
 
@@ -146,6 +180,10 @@ provider" trustworthy rather than aspirational. Any adapter repo runs
 ```cajeta
 ObjectStoreContract.verify(myAdapter, "conformance-scratch/");
 ```
+
+`IdentityContract.verify(myPool, myHooks, "conformance-")` is the same
+thing for the identity port, and a pool whose register skips the
+uniqueness check fails it (`IdentityTest::skippedUniquenessIsCaught`).
 
 One suite, whole port, pass or fail. Selection is
 capability-conditional (declared → tested; undeclared → asserted to
@@ -170,7 +208,7 @@ reach a log (§9.5).
 ## Building
 
 ```sh
-CAJETA=<path-to-cajeta> ./run-tests.sh   # 35 tests
+CAJETA=<path-to-cajeta> ./run-tests.sh   # 43 tests
 CAJETA=<path-to-cajeta> ./run-tour.sh    # the self-checking tour
 ```
 
