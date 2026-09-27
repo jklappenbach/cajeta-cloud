@@ -59,7 +59,11 @@
             // run the tour clean, so the choice between those two is
             // alignment rather than capability. All three measured on the
             // released binaries on 2026-09-21.
-            "version": "0.29.0"
+            //
+            // Raised to v0.30.1 for the identity primitives (HmacSha256,
+            // Pbkdf2, SecureRandom). On that release the suite runs 43
+            // passed, 0 failed, 1 skipped, and the tour runs clean.
+            "version": "0.30.1"
         },
 
         // THE load-bearing line (§14.11): no filesystem, no network.
