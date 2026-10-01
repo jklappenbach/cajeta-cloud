@@ -62,7 +62,7 @@ env:
   # Pin forward, never back. The floor was not bisected past these three
   # points, so the only honest statement is that v0.28.0 and v0.29.0 run
   # this tree and v0.17.4 does not.
-  CAJETA_VERSION: v0.30.1
+  CAJETA_VERSION: v0.32.0
 
 jobs:
   build-test:

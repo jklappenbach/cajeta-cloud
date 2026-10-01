@@ -34,7 +34,7 @@
 
     "details": {
         "name":               "dev.cajeta.cloud",
-        "version":            "0.1.1",
+        "version":            "0.2.0",
         "description":        "cajeta-cloud — provider-neutral cloud ports: object store + stream + identity, in-memory drivers, conformance testkits, capability negotiation",
         "license":            "Apache-2.0",
         "authors":            ["Julian Klappenbach"],
@@ -63,7 +63,7 @@
             // Raised to v0.30.1 for the identity primitives (HmacSha256,
             // Pbkdf2, SecureRandom). On that release the suite runs 43
             // passed, 0 failed, 1 skipped, and the tour runs clean.
-            "version": "0.30.1"
+            "version": "0.32.0"
         },
 
         // THE load-bearing line (§14.11): no filesystem, no network.
