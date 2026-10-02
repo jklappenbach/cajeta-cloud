@@ -63,7 +63,11 @@
             // Raised to v0.30.1 for the identity primitives (HmacSha256,
             // Pbkdf2, SecureRandom). On that release the suite runs 43
             // passed, 0 failed, 1 skipped, and the tour runs clean.
-            "version": "0.32.0"
+            //
+            // Raised to v0.32.2, whose String field stores stopped dropping a
+            // value HashMap.remove had handed out (IdentityTest crashed in
+            // about 3% of runs on every earlier toolchain).
+            "version": "0.32.2"
         },
 
         // THE load-bearing line (§14.11): no filesystem, no network.
