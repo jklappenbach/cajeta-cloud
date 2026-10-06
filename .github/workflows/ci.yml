@@ -62,7 +62,10 @@ env:
   # Pin forward, never back. The floor was not bisected past these three
   # points, so the only honest statement is that v0.28.0 and v0.29.0 run
   # this tree and v0.17.4 does not.
-  CAJETA_VERSION: v0.32.2
+  #
+  # Raised to v0.35.0 with cajeta.json, the release that enforces the
+  # field-store rule on dependency archives.
+  CAJETA_VERSION: v0.35.0
 
 jobs:
   build-test:

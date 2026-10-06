@@ -34,7 +34,7 @@
 
     "details": {
         "name":               "dev.cajeta.cloud",
-        "version":            "0.2.0",
+        "version":            "0.2.1",
         "description":        "cajeta-cloud — provider-neutral cloud ports: object store + stream + identity, in-memory drivers, conformance testkits, capability negotiation",
         "license":            "Apache-2.0",
         "authors":            ["Julian Klappenbach"],
@@ -67,7 +67,10 @@
             // Raised to v0.32.2, whose String field stores stopped dropping a
             // value HashMap.remove had handed out (IdentityTest crashed in
             // about 3% of runs on every earlier toolchain).
-            "version": "0.32.2"
+            //
+            // Raised to v0.35.0, which enforces the field-store rule on every
+            // dependency archive a consumer compiles.
+            "version": "0.35.0"
         },
 
         // THE load-bearing line (§14.11): no filesystem, no network.
@@ -84,8 +87,10 @@
         // moment it goes on a classpath: 0.2.0 under v0.28.0 and v0.29.0,
         // 0.2.3 and 0.2.5 under v0.29.0. 0.3.0 is the first that stores
         // that closure parameter with `#=`.
+        //
+        // 0.3.3 is the unit release republished for v0.35.0.
         "dev-dependencies": {
-            "dev.cajeta.unit": "0.3.0"
+            "dev.cajeta.unit": "0.3.3"
         },
 
         "repositories": [
