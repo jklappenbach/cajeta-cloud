@@ -34,7 +34,7 @@
 
     "details": {
         "name":               "dev.cajeta.cloud",
-        "version":            "0.2.1",
+        "version":            "0.2.2",
         "description":        "cajeta-cloud — provider-neutral cloud ports: object store + stream + identity, in-memory drivers, conformance testkits, capability negotiation",
         "license":            "Apache-2.0",
         "authors":            ["Julian Klappenbach"],
@@ -70,7 +70,9 @@
             //
             // Raised to v0.35.0, which enforces the field-store rule on every
             // dependency archive a consumer compiles.
-            "version": "0.35.0"
+            //
+            // Raised to v0.36.0 for the fleet republish.
+            "version": "0.36.0"
         },
 
         // THE load-bearing line (§14.11): no filesystem, no network.
@@ -89,8 +91,9 @@
         // that closure parameter with `#=`.
         //
         // 0.3.3 is the unit release republished for v0.35.0.
+        // 0.3.4 is the unit release republished for v0.36.0.
         "dev-dependencies": {
-            "dev.cajeta.unit": "0.3.3"
+            "dev.cajeta.unit": "0.3.4"
         },
 
         "repositories": [
