@@ -69,7 +69,9 @@ env:
   # Raised to v0.36.0 for the fleet republish.
   #
   # Raised to v0.38.0 for the fleet republish.
-  CAJETA_VERSION: v0.38.0
+  #
+  # Raised to v0.39.0 for the fleet republish.
+  CAJETA_VERSION: v0.39.0
 
 jobs:
   build-test:
