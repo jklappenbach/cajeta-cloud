@@ -13,3 +13,8 @@ so each case is its own build.
 | 2.1.3 | app, stub, config | `pick-stub` | `selected stub` |
 | 2.1.3 | app, stub, config | `pick-memory` | `selected memory` |
 | 2.1.3 | app, stub, config | `pick-nope` | refused, listing `memory` and `stub` |
+| env | app | default (prod), `IDENTITY_PROVIDER=memory` | `selected memory` |
+| env | app, stub | default (prod), `IDENTITY_PROVIDER=stub` | `selected stub` |
+| code wins | app, stub, config | `pick-stub`, `IDENTITY_PROVIDER=memory` | `selected stub` |
+
+Every case without an `IDENTITY_PROVIDER` column runs with it unset.

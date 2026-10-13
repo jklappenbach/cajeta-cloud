@@ -7,9 +7,12 @@ import cajeta.collection.Collectors;
 
 /**
  * Chooses the `UserPool` a program uses (identity spec §9): every
- * compiled-in implementation arrives as a named component, the
- * application's {@link IdentityConfig} names one, and the build's profile
- * decides whether the memory driver may stand in unnamed. Consumers inject
+ * compiled-in implementation arrives as a named component,
+ * `identity.provider` names one, and the build's profile
+ * decides whether the memory driver may stand in unnamed.
+ * `identity.provider` is the application's {@link IdentityConfig} when it
+ * declares one that returns a name, and the `IDENTITY_PROVIDER` environment
+ * variable otherwise: code overrides the environment. Consumers inject
  * this and call {@link #pool}; building it validates the choice, so a bad
  * one refuses startup with an {@link IdentitySelectionException}.
  *
@@ -42,13 +45,20 @@ public final class IdentitySelector {
             present[i] #= names.get(i);
             i = i + 1;
         }
+        // Code wins over the environment, as the AWS SDKs order it.
         String configured = null;
         if (this.config.count() > 0) {
             configured = this.config.get(0).provider();
         }
+        if (configured == null || configured.byteLength() == 0) {
+            configured = System.env.get(IdentitySelector.ENV());
+        }
         this.chosen #= IdentitySelector.decide(present, configured, this.development.count() > 0);
         return;
     }
+
+    /** The environment variable that names the provider when no `IdentityConfig` does. */
+    public static String ENV() { return "IDENTITY_PROVIDER"; }
 
     /** The selected implementation's component name, such as `memory`. */
     public String provider() { return this.chosen; }

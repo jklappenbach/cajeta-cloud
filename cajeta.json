@@ -83,8 +83,11 @@
             "version": "0.41.0"
         },
 
-        // THE load-bearing line (§14.11): no filesystem, no network.
-        "capabilities": [],
+        // THE load-bearing line (§14.11, amended 2026-10-13): no filesystem,
+        // no network. `env` is for one read, IDENTITY_PROVIDER, which names
+        // the identity pool when the application's code does not (identity
+        // §9.2, the AWS order: code overrides the environment).
+        "capabilities": ["env"],
 
         // No provider SDK, no local backend, no cajeta library — pure
         // stdlib (§14.13).

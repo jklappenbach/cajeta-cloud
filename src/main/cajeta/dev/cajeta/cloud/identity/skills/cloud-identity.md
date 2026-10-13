@@ -61,11 +61,11 @@ a driver declaring nothing, for exercising the undeclared branches.
 
 Inject `IdentitySelector` and call `pool()`; never `heap MemoryUserPool()` in
 application code. Every implementation is a named `@Component`
-(`MemoryUserPool` is `memory`; an adapter must declare its own name). The
-application declares at most one `IdentityConfig` component whose
-`provider()` returns `identity.provider`, read from wherever it keeps
-configuration (`System.env.get("IDENTITY_PROVIDER")`); a `@Profile` on it
-picks per environment. Unset selects the only implementation, and the memory
+(`MemoryUserPool` is `memory`; an adapter must declare its own name). `identity.provider`
+is the `IDENTITY_PROVIDER` environment variable unless code overrides it: an
+`IdentityConfig` component whose `provider()` returns a name wins, and null
+defers to the environment. Declare at most one; a `@Profile` on it picks per
+environment. Unset selects the only implementation, and the memory
 driver unnamed is accepted only in the `test`, `dev` or `development`
 profile. A bad choice is an `IdentitySelectionException` when the selector
 is built, naming `identity.provider` and the implementations present.
@@ -74,7 +74,7 @@ is built, naming `identity.provider` and the implementations present.
 
 - Do not catch `CloudException` expecting identity failures.
 - Do not compare a password or a code yourself in a message or a log line.
-- Do not read the environment inside this library; `IdentityConfig` is where
-  configuration enters.
+- Do not read any environment variable here but `IDENTITY_PROVIDER`; the
+  `env` capability is declared for that one read.
 - Do not build a filesystem-backed pool here: it belongs in
-  `cajeta-cloud-local`, this library stays at `capabilities: []`.
+  `cajeta-cloud-local`; this library declares only `env`.

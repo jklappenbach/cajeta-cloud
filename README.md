@@ -8,8 +8,10 @@ a rewrite.
 
 This library is **ports, in-memory drivers, and conformance testkits —
 nothing else** (spec §14.11/§14.13): the manifest declares
-`"capabilities": []` and `"dependencies": {}`, and `run-tests.sh`
-enforces both. No filesystem, no network, no provider SDK. The full
+`"capabilities": ["env"]` and `"dependencies": {}`, and `run-tests.sh`
+enforces both. `env` is for one read, `IDENTITY_PROVIDER` (see
+[Choosing the pool](#choosing-the-pool)). No filesystem, no network, no
+provider SDK. The full
 test suite — concurrent conditional writes included — runs with no
 provider account (§14.12).
 
@@ -153,16 +155,17 @@ IdentitySelector s = IdentitySelector.__cajeta_inject();
 UserPool users = s.pool();
 ```
 
-`identity.provider` comes from an `IdentityConfig` component the
-application declares. This library reads no environment (its manifest
-declares no capabilities), so the application reads it from wherever it
-keeps configuration, and a `@Profile` on it lets each environment's build
-name its own provider:
+`identity.provider` comes from the `IDENTITY_PROVIDER` environment
+variable, and code overrides it, in the order the AWS SDKs use: an
+`IdentityConfig` component the application declares wins when its
+`provider()` returns a name, and null defers to the environment. A
+`@Profile` on it names a provider per environment's build:
 
 ```cajeta
 @Component
-public final class EnvIdentityConfig implements IdentityConfig {
-    public String provider() { return System.env.get("IDENTITY_PROVIDER"); }
+@Profile("staging")
+public final class StagingIdentity implements IdentityConfig {
+    public String provider() { return "cognito"; }
 }
 ```
 

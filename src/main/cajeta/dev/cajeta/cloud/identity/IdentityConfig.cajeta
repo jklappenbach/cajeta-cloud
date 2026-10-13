@@ -3,12 +3,12 @@ package dev.cajeta.cloud.identity;
 import cajeta.lang.String;
 
 /**
- * The application's `identity.provider` (identity spec §9.2): which
- * compiled-in `UserPool` to use, or null for unset. The application declares
- * at most one as a `@Component`, from wherever it keeps configuration, such
- * as `System.env.get("IDENTITY_PROVIDER")`, and may put a `@Profile` on it so
- * each environment's build names its own provider (§9.5). This library reads
- * no environment itself: its manifest declares no capabilities.
+ * `identity.provider` set in code (identity spec §9.2): which compiled-in
+ * `UserPool` to use. The `IDENTITY_PROVIDER` environment variable names it
+ * otherwise; a component of this type overrides the environment when its
+ * `provider()` returns a name, and null defers to it. Declare at most one,
+ * and put a `@Profile` on it to name a provider per environment's build
+ * (§9.5).
  */
 public interface IdentityConfig {
     String provider();

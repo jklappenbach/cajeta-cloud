@@ -106,14 +106,15 @@ fi
 [[ -f "$unit_cja" ]] || { echo "could not resolve a dev.cajeta.unit archive" >&2; exit 1; }
 echo ">> cajeta-unit: $unit_cja"
 
-# §14.11 + §14.13 (plan 1.1.1/1.1.2): the interface library declares NO
-# capabilities and NO runtime dependencies — a filesystem driver or a
-# provider SDK landing here is a spec violation, not a shortcut.
-grep -q '"capabilities": \[\]' "$here/cajeta.json" \
-    || { echo "SPEC VIOLATION (§14.11): capabilities must stay []" >&2; exit 1; }
+# §14.11 + §14.13 (plan 1.1.1/1.1.2): the interface library declares only
+# `env` (§14.11 as amended 2026-10-13, for IDENTITY_PROVIDER) and NO runtime
+# dependencies — a filesystem driver or a provider SDK landing here is a spec
+# violation, not a shortcut.
+grep -q '"capabilities": \["env"\]' "$here/cajeta.json" \
+    || { echo "SPEC VIOLATION (§14.11): capabilities must be exactly [\"env\"]" >&2; exit 1; }
 grep -q '"dependencies": {}' "$here/cajeta.json" \
     || { echo "SPEC VIOLATION (§14.13): runtime dependencies must stay {}" >&2; exit 1; }
-echo ">> manifest: capabilities [] and dependencies {} verified"
+echo ">> manifest: capabilities [\"env\"] and dependencies {} verified"
 
 # `details.version` is the single source of truth and `Cloud.version()`
 # hands consumers a literal copy of it. Nothing at runtime can compare
@@ -152,7 +153,7 @@ echo ">> identity selection fixtures"
 sel="$here/src/test/selection"
 sel_fail=0
 selection_case() {
-    local label="$1" profile="$2" expect="$3"; shift 3
+    local label="$1" profile="$2" envval="$3" expect="$4"; shift 4
     local root="$out/sel-$label"
     mkdir -p "$root/src" "$root/out"
     for part in "$@"; do cp -r "$sel/$part/." "$root/src/"; done
@@ -165,7 +166,11 @@ selection_case() {
         sel_fail=1; return
     fi
     local got
-    got="$("$root/prog" 2>&1 || true)"
+    if [[ -n "$envval" ]]; then
+        got="$(IDENTITY_PROVIDER="$envval" "$root/prog" 2>&1 || true)"
+    else
+        got="$(env -u IDENTITY_PROVIDER "$root/prog" 2>&1 || true)"
+    fi
     local frag
     IFS='|' read -ra frags <<< "$expect"
     for frag in "${frags[@]}"; do
@@ -176,10 +181,14 @@ selection_case() {
     done
     echo "  ok   $label: $got"
 }
-selection_case one-test     test        "selected memory"                          app
-selection_case one-prod     ""          "refused:|identity.provider"               app
-selection_case named-prod   pick-memory "selected memory"                          app config
-selection_case two-stub     pick-stub   "selected stub"                            app stub config
-selection_case two-memory   pick-memory "selected memory"                          app stub config
-selection_case two-unknown  pick-nope   "refused:|nope|memory|stub"                app stub config
+selection_case one-test     test        ""     "selected memory"            app
+selection_case one-prod     ""          ""     "refused:|identity.provider" app
+selection_case named-prod   pick-memory ""     "selected memory"            app config
+selection_case two-stub     pick-stub   ""     "selected stub"              app stub config
+selection_case two-memory   pick-memory ""     "selected memory"            app stub config
+selection_case two-unknown  pick-nope   ""     "refused:|nope|memory|stub"  app stub config
+# The environment names the provider when code does not; code wins when it does.
+selection_case env-prod     ""          memory "selected memory"            app
+selection_case env-two      ""          stub   "selected stub"              app stub
+selection_case code-wins    pick-stub   memory "selected stub"              app stub config
 [[ "$sel_fail" == 0 ]] || { echo "identity selection fixtures failed" >&2; exit 1; }
