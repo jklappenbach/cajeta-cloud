@@ -1,0 +1,51 @@
+package dev.cajeta.cloud.selectfix;
+
+import cajeta.lang.String;
+import dev.cajeta.cloud.Capabilities;
+import dev.cajeta.cloud.identity.Attributes;
+import dev.cajeta.cloud.identity.MemoryUserPool;
+import dev.cajeta.cloud.identity.RegistrationResult;
+import dev.cajeta.cloud.identity.User;
+import dev.cajeta.cloud.identity.UserPool;
+
+/** A second compiled-in adapter, named `stub`, delegating to a memory pool. */
+@Component(name = "stub")
+public final class StubPool implements UserPool {
+
+    MemoryUserPool inner;
+
+    public StubPool() {
+        this.inner = heap MemoryUserPool();
+        return;
+    }
+
+    public Capabilities capabilities() { return this.inner.capabilities(); }
+
+    public #RegistrationResult register(String username, String password) {
+        return this.inner.register(username, password);
+    }
+
+    public #RegistrationResult registerWith(String username, String password, Attributes attributes) {
+        return this.inner.registerWith(username, password, attributes);
+    }
+
+    public void confirm(String username, String code) { this.inner.confirm(username, code); }
+
+    public #User lookupBySubject(String subject) { return this.inner.lookupBySubject(subject); }
+
+    public #User lookupByName(String username) { return this.inner.lookupByName(username); }
+
+    public boolean delete(String subject) { return this.inner.delete(subject); }
+
+    public void setAttribute(String subject, String name, String value) {
+        this.inner.setAttribute(subject, name, value);
+    }
+
+    public void removeAttribute(String subject, String name) { this.inner.removeAttribute(subject, name); }
+
+    public void addToGroup(String subject, String group) { this.inner.addToGroup(subject, group); }
+
+    public void removeFromGroup(String subject, String group) { this.inner.removeFromGroup(subject, group); }
+
+    public #String[] groups(String subject) { return this.inner.groups(subject); }
+}

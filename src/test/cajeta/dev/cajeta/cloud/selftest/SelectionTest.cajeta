@@ -1,0 +1,71 @@
+package dev.cajeta.cloud.selftest;
+
+import cajeta.lang.String;
+import dev.cajeta.unit.Assert;
+import dev.cajeta.cloud.identity.IdentitySelectionException;
+import dev.cajeta.cloud.identity.IdentitySelector;
+
+/**
+ * cajeta-cloud-identity Unit 2, the rules (spec §9.2 to §9.5): which
+ * compiled-in implementation `identity.provider` and the profile select.
+ * The DI wiring is exercised by the selection fixtures run-tests.sh builds
+ * under each profile.
+ */
+public class SelectionTest {
+
+    public SelectionTest() { return; }
+
+    static #String refusal(String[] present, String configured, boolean development) {
+        try {
+            String chosen #= IdentitySelector.decide(present, configured, development);
+            String none = "selected " + chosen;
+            return #none;
+        } catch (IdentitySelectionException e) {
+            String m = "" + e.getMessage();
+            return #m;
+        }
+    }
+
+    @Test
+    public void memoryAloneIsSelectedWithoutConfigurationInATestProfile() {
+        String[] present = [ "memory" ];
+        String chosen #= IdentitySelector.decide(present, null, true);
+        Assert.isTrue(chosen.equals("memory"));
+    }
+
+    @Test
+    public void memoryAloneIsRefusedInProductionUnlessNamed() {
+        String[] present = [ "memory" ];
+        String why #= SelectionTest.refusal(present, null, false);
+        Assert.isTrue(why.indexOf("identity.provider") >= 0);
+        Assert.isTrue(why.indexOf("selected") < 0);
+        String chosen #= IdentitySelector.decide(present, "memory", false);
+        Assert.isTrue(chosen.equals("memory"));
+    }
+
+    @Test
+    public void configurationSelectsEachCompiledInImplementationByName() {
+        String[] present = [ "memory", "stub" ];
+        String stub #= IdentitySelector.decide(present, "stub", false);
+        String memory #= IdentitySelector.decide(present, "memory", false);
+        Assert.isTrue(stub.equals("stub"));
+        Assert.isTrue(memory.equals("memory"));
+    }
+
+    @Test
+    public void anUnknownNameFailsListingThePresentOnes() {
+        String[] present = [ "memory", "stub" ];
+        String why #= SelectionTest.refusal(present, "nope", true);
+        Assert.isTrue(why.indexOf("nope") >= 0);
+        Assert.isTrue(why.indexOf("memory") >= 0);
+        Assert.isTrue(why.indexOf("stub") >= 0);
+    }
+
+    @Test
+    public void severalImplementationsWithoutConfigurationFailListingThem() {
+        String[] present = [ "memory", "stub" ];
+        String why #= SelectionTest.refusal(present, null, true);
+        Assert.isTrue(why.indexOf("identity.provider") >= 0);
+        Assert.isTrue(why.indexOf("stub") >= 0);
+    }
+}

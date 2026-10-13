@@ -1,0 +1,108 @@
+package dev.cajeta.cloud.identity;
+
+import cajeta.collection.ArrayList;
+import cajeta.collection.HashMap;
+import cajeta.lang.String;
+import cajeta.collection.Collectors;
+
+/**
+ * Chooses the `UserPool` a program uses (identity spec §9): every
+ * compiled-in implementation arrives as a named component, the
+ * application's {@link IdentityConfig} names one, and the build's profile
+ * decides whether the memory driver may stand in unnamed. Consumers inject
+ * this and call {@link #pool}; building it validates the choice, so a bad
+ * one refuses startup with an {@link IdentitySelectionException}.
+ *
+ * ```cajeta
+ * IdentitySelector s = IdentitySelector.__cajeta_inject();
+ * UserPool users = s.pool();
+ * ```
+ */
+@Component
+public final class IdentitySelector {
+
+    @Inject HashMap<String, UserPool> pools;
+    @Inject ArrayList<IdentityConfig> config;
+    @Inject ArrayList<DevelopmentProfile> development;
+
+    String chosen;
+
+    public IdentitySelector() {
+        this.chosen = null;
+        return;
+    }
+
+    @PostConstruct
+    public void select() {
+        ArrayList<String> names #= this.pools.keys().collect(Collectors.toList<String>());
+        int32 n = (int32) names.count();
+        String[] present = heap String[n];
+        int32 i = 0;
+        while (i < n) {
+            present[i] #= names.get(i);
+            i = i + 1;
+        }
+        String configured = null;
+        if (this.config.count() > 0) {
+            configured = this.config.get(0).provider();
+        }
+        this.chosen #= IdentitySelector.decide(present, configured, this.development.count() > 0);
+        return;
+    }
+
+    /** The selected implementation's component name, such as `memory`. */
+    public String provider() { return this.chosen; }
+
+    /** The selected pool. */
+    public UserPool pool() { return this.pools.get(this.chosen); }
+
+    static #String listing(String[] present) {
+        String out = "";
+        int32 i = 0;
+        while (i < present.count()) {
+            if (i > 0) {
+                out = out + ", ";
+            }
+            out = out + present[i];
+            i = i + 1;
+        }
+        return #out;
+    }
+
+    /**
+     * The rule (§9.2 to §9.5): a configured name must be present; unset
+     * selects the only implementation, which must be the memory driver in a
+     * development or test profile. Anything else is refused, naming the key
+     * and what is present.
+     */
+    public static #String decide(String[] present, String configured, boolean development) {
+        if (configured != null && configured.byteLength() > 0) {
+            int32 i = 0;
+            while (i < present.count()) {
+                if (present[i].equals(configured)) {
+                    String hit = "" + configured;
+                    return #hit;
+                }
+                i = i + 1;
+            }
+            throw heap IdentitySelectionException("identity.provider = " + configured
+                + " matches no compiled-in implementation; present: " + IdentitySelector.listing(present));
+        }
+        if (present.count() == 0) {
+            throw heap IdentitySelectionException(
+                "identity.provider is unset and no UserPool implementation is compiled in");
+        }
+        if (present.count() > 1) {
+            throw heap IdentitySelectionException("identity.provider is unset and "
+                + present.count() + " implementations are compiled in; name one of: "
+                + IdentitySelector.listing(present));
+        }
+        if (present[0].equals("memory") && !development) {
+            throw heap IdentitySelectionException("identity.provider is unset, and outside a test or dev "
+                + "profile the memory driver must be named (identity.provider = memory): its users "
+                + "are gone on restart");
+        }
+        String only = "" + present[0];
+        return #only;
+    }
+}

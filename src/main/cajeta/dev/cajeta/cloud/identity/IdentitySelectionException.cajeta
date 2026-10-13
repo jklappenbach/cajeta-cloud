@@ -1,0 +1,17 @@
+package dev.cajeta.cloud.identity;
+
+import cajeta.error.RecoverableException;
+import cajeta.lang.String;
+
+/**
+ * Startup refused: `identity.provider` names nothing compiled in, or is
+ * unset where the build cannot choose (identity spec §9.2 to §9.4). The
+ * message names the key and the implementations present. A deployment
+ * error, not one of the port's operation failures.
+ */
+public class IdentitySelectionException extends RecoverableException {
+    public IdentitySelectionException(String message) {
+        this.message = "" + message;
+        this.cause = 0;
+    }
+}

@@ -17,6 +17,7 @@ import dev.cajeta.cloud.Capabilities;
  * as the password. Confirmation codes are never delivered; the test
  * seam {@link #hooks} exposes them (§3.7).
  */
+@Component(name = "memory")
 public final class MemoryUserPool implements UserPool {
 
     MemIdentityState st;

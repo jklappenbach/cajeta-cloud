@@ -1,0 +1,24 @@
+package dev.cajeta.cloud.selectfix;
+
+import cajeta.lang.String;
+import cajeta.lang.System;
+import dev.cajeta.cloud.identity.IdentitySelectionException;
+import dev.cajeta.cloud.identity.IdentitySelector;
+import dev.cajeta.cloud.identity.RegistrationResult;
+import dev.cajeta.cloud.identity.UserPool;
+
+/** A consumer that injects the selected pool and uses it, or reports the refusal. */
+public class Main {
+    public static int32 run() {
+        try {
+            IdentitySelector s = IdentitySelector.__cajeta_inject();
+            UserPool p = s.pool();
+            RegistrationResult r #= p.register("ada", "correct horse");
+            System.stdout.println("selected " + s.provider());
+            return 0;
+        } catch (IdentitySelectionException e) {
+            System.stdout.println("refused: " + e.getMessage());
+            return 3;
+        }
+    }
+}

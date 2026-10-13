@@ -1,0 +1,28 @@
+package dev.cajeta.cloud.selectfix;
+
+import cajeta.lang.String;
+import dev.cajeta.cloud.identity.IdentityConfig;
+
+/** `identity.provider = stub`, in the pick-stub profile. */
+@Component
+@Profile("pick-stub")
+public final class PickStub implements IdentityConfig {
+    public PickStub() { return; }
+    public String provider() { return "stub"; }
+}
+
+/** `identity.provider = memory`, in the pick-memory profile, which is not a test or dev profile. */
+@Component
+@Profile("pick-memory")
+public final class PickMemory implements IdentityConfig {
+    public PickMemory() { return; }
+    public String provider() { return "memory"; }
+}
+
+/** `identity.provider = nope`, which names nothing compiled in. */
+@Component
+@Profile("pick-nope")
+public final class PickNope implements IdentityConfig {
+    public PickNope() { return; }
+    public String provider() { return "nope"; }
+}

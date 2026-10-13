@@ -143,3 +143,43 @@ echo ">> building + running the test binary"
     dev.cajeta.cloud.selftest.TestMain.run "$here/src/test/cajeta" "$out" >/dev/null
 
 "$out/ctests"
+
+# --- identity selection (cajeta-cloud-identity Unit 2) ------------------
+# The DI graph is decided at build, so each selection case is its own build:
+# src/test/selection/README.md lists the cases. A case passes when the line
+# the program prints contains every expected fragment.
+echo ">> identity selection fixtures"
+sel="$here/src/test/selection"
+sel_fail=0
+selection_case() {
+    local label="$1" profile="$2" expect="$3"; shift 3
+    local root="$out/sel-$label"
+    mkdir -p "$root/src" "$root/out"
+    for part in "$@"; do cp -r "$sel/$part/." "$root/src/"; done
+    local pflag=()
+    [[ -n "$profile" ]] && pflag=(--profile="$profile")
+    if ! "$CAJETA" --emit=exe "${pflag[@]}" --classpath="$out/cloud.cja" \
+            -o "$root/prog" dev.cajeta.cloud.selectfix.Main.run \
+            "$root/src" "$root/out" > "$root/build.log" 2>&1; then
+        echo "  FAIL $label: build failed"; sed -n '1,20p' "$root/build.log"
+        sel_fail=1; return
+    fi
+    local got
+    got="$("$root/prog" 2>&1 || true)"
+    local frag
+    IFS='|' read -ra frags <<< "$expect"
+    for frag in "${frags[@]}"; do
+        if [[ "$got" != *"$frag"* ]]; then
+            echo "  FAIL $label: expected '$frag' in: $got"
+            sel_fail=1; return
+        fi
+    done
+    echo "  ok   $label: $got"
+}
+selection_case one-test     test        "selected memory"                          app
+selection_case one-prod     ""          "refused:|identity.provider"               app
+selection_case named-prod   pick-memory "selected memory"                          app config
+selection_case two-stub     pick-stub   "selected stub"                            app stub config
+selection_case two-memory   pick-memory "selected memory"                          app stub config
+selection_case two-unknown  pick-nope   "refused:|nope|memory|stub"                app stub config
+[[ "$sel_fail" == 0 ]] || { echo "identity selection fixtures failed" >&2; exit 1; }

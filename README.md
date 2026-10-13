@@ -140,6 +140,43 @@ fakes a delivery channel: the confirmation code a test needs comes from
 one of the §11.1 kinds. Authentication, challenges and tokens are the
 full cut and follow with primavera's security phase.
 
+### Choosing the pool
+
+Which implementations exist is decided at build; which one a program uses
+is ordinary selection over that set (identity addendum §9). Each
+implementation is a named `@Component`: `MemoryUserPool` is `memory`, and an
+adapter declares its own name, such as `@Component(name = "cognito")`.
+Consumers inject `IdentitySelector` and take `pool()`:
+
+```cajeta
+IdentitySelector s = IdentitySelector.__cajeta_inject();
+UserPool users = s.pool();
+```
+
+`identity.provider` comes from an `IdentityConfig` component the
+application declares. This library reads no environment (its manifest
+declares no capabilities), so the application reads it from wherever it
+keeps configuration, and a `@Profile` on it lets each environment's build
+name its own provider:
+
+```cajeta
+@Component
+public final class EnvIdentityConfig implements IdentityConfig {
+    public String provider() { return System.env.get("IDENTITY_PROVIDER"); }
+}
+```
+
+| Compiled in | `identity.provider` | Test or dev profile | Other profiles |
+|---|---|---|---|
+| memory only | unset | memory | refused: name it |
+| anything | a present name | that one | that one |
+| anything | an absent name | refused, listing what is present | same |
+| several | unset | refused, listing them | same |
+
+A refusal is an `IdentitySelectionException`, thrown when the selector is
+built, so injecting it at startup refuses startup. The development
+profiles are `test`, `dev` and `development`.
+
 ## Capability negotiation — `Capabilities` / `Caps`
 
 A definitive answer **before** any operation (§3). Partial support is

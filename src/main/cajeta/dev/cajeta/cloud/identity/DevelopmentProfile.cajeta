@@ -1,0 +1,12 @@
+package dev.cajeta.cloud.identity;
+
+/**
+ * Present in the DI graph only in a development or test profile, so
+ * {@link IdentitySelector} can tell a production build by its absence
+ * (identity spec §9.4) with no runtime profile API.
+ */
+@Component
+@Profile({"test", "dev", "development"})
+public final class DevelopmentProfile {
+    public DevelopmentProfile() { return; }
+}
