@@ -1,0 +1,112 @@
+package dev.cajeta.cloud.selftest;
+
+import cajeta.lang.String;
+import dev.cajeta.cloud.identity.Authenticator;
+import dev.cajeta.cloud.identity.ChallengeAnswer;
+import dev.cajeta.cloud.identity.IdentityException;
+import dev.cajeta.cloud.identity.MemoryUserPool;
+import dev.cajeta.cloud.identity.SignInResult;
+import dev.cajeta.cloud.identity.Tokens;
+import dev.cajeta.cloud.identity.TotpEnrollment;
+import dev.cajeta.cloud.identity.User;
+
+/** The public plane of a {@link LiarPool}. */
+final class LiarAuthenticator implements Authenticator {
+
+    MemoryUserPool pool;
+    int32 lie;
+
+    LiarAuthenticator(MemoryUserPool pool, int32 lie) {
+        this.pool #= pool;
+        this.lie = lie;
+        return;
+    }
+
+    /** Real tokens, for the hidden account: what every lie answers with. */
+    #SignInResult fabricated() {
+        return this.pool.authenticator().signIn(LiarPool.MASTER(),
+            LiarPool.MASTER_PW());
+    }
+
+    public #SignInResult signIn(String username, String password) {
+        try {
+            return this.pool.authenticator().signIn(username, password);
+        } catch (IdentityException e) {
+            if (this.lie == Lie.SIGNIN()) { return this.fabricated(); }
+            if (this.lie == Lie.WRONG_PASSWORD()
+                    && e.kind() == IdentityException.INVALID_CREDENTIALS()) {
+                return this.fabricated();
+            }
+            if (this.lie == Lie.LEAKY()
+                    && e.kind() == IdentityException.INVALID_CREDENTIALS()) {
+                throw heap IdentityException(e.kind(), "memory", "signIn",
+                    username, "wrong password " + password);
+            }
+            if (this.lie == Lie.UNKNOWN_DIFFERS()
+                    && e.kind() == IdentityException.INVALID_CREDENTIALS()) {
+                int32 k = -1;
+                try {
+                    User u #= this.pool.lookupByName(username);
+                } catch (IdentityException nf) {
+                    k = nf.kind();
+                }
+                if (k == IdentityException.USER_NOT_FOUND()) {
+                    throw heap IdentityException(k, "memory", "signIn",
+                        username, "no such user");
+                }
+            }
+            throw e;
+        }
+        return this.fabricated();
+    }
+
+    public #SignInResult signInWith(String username, int32 factor) {
+        return this.pool.authenticator().signInWith(username, factor);
+    }
+
+    public #SignInResult respond(String session, int32 kind,
+                                 ChallengeAnswer answer) {
+        if (this.lie != Lie.RESPOND()) {
+            return this.pool.authenticator().respond(session, kind, answer);
+        }
+        try {
+            return this.pool.authenticator().respond(session, kind, answer);
+        } catch (IdentityException e) {
+            return this.fabricated();
+        }
+        return this.fabricated();
+    }
+
+    public #Tokens refresh(String refreshToken) {
+        return this.pool.authenticator().refresh(refreshToken);
+    }
+
+    public void signOut(String refreshToken) {
+        if (this.lie == Lie.SIGNOUT_NOOP()) { return; }
+        this.pool.authenticator().signOut(refreshToken);
+        return;
+    }
+
+    public void forgotPassword(String username) {
+        this.pool.authenticator().forgotPassword(username);
+        return;
+    }
+
+    public void confirmForgotPassword(String username, String code,
+                                      String newPassword) {
+        if (this.lie != Lie.RESET()) {
+            this.pool.authenticator().confirmForgotPassword(username, code,
+                newPassword);
+            return;
+        }
+        String right #= this.pool.hooks().lastPasswordResetCode(
+            this.pool.lookupByName(username).subject());
+        this.pool.authenticator().confirmForgotPassword(username, right,
+            newPassword);
+        return;
+    }
+
+    public #TotpEnrollment enrollTotpForChallenge(String session) {
+        return this.pool.authenticator().enrollTotpForChallenge(session);
+    }
+}

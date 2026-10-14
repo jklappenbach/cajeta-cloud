@@ -1,0 +1,55 @@
+package dev.cajeta.cloud.identity;
+
+import cajeta.lang.String;
+
+/**
+ * The one answer shape (identity spec §15.5): a value (a code, a new
+ * password, a custom answer, a passkey assertion), a chosen factor for
+ * SELECT_FACTOR, and the required attributes NEW_PASSWORD_REQUIRED asks
+ * for. The value is a secret and has no printable form.
+ */
+public final class ChallengeAnswer {
+
+    String val;
+    int32 chosen;
+    Attributes attrs;
+
+    public ChallengeAnswer(String value) {
+        this.val = "" + value;
+        this.chosen = -1;
+        this.attrs = heap Attributes();
+        return;
+    }
+
+    /** A code answering TOTP, SMS_OTP, EMAIL_OTP or MFA_SETUP. */
+    public static #ChallengeAnswer code(String code) {
+        ChallengeAnswer a = heap ChallengeAnswer(code);
+        return #a;
+    }
+
+    /** NEW_PASSWORD_REQUIRED: the new password and the attributes it requires. */
+    public static #ChallengeAnswer newPassword(String password,
+                                               Attributes required) {
+        ChallengeAnswer a = heap ChallengeAnswer(password);
+        a.attrs #= required.copy();
+        return #a;
+    }
+
+    /** SELECT_FACTOR: the chosen {@link Factor}. */
+    public static #ChallengeAnswer factor(int32 factor) {
+        ChallengeAnswer a = heap ChallengeAnswer("");
+        a.chosen = factor;
+        return #a;
+    }
+
+    public #String value() {
+        String out = "" + this.val;
+        return #out;
+    }
+
+    /** The chosen factor, or -1. */
+    public int32 factor() { return this.chosen; }
+
+    /** The attributes, a view. */
+    public Attributes attributes() { return this.attrs; }
+}

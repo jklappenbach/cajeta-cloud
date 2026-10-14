@@ -1,0 +1,29 @@
+package dev.cajeta.cloud.identity;
+
+import cajeta.concurrent.LockGuard;
+import cajeta.lang.String;
+
+/**
+ * The memory driver's verifier (identity spec §5.3, §5.5): HS256 under
+ * the pool's per-process key, which {@link #jwks} publishes so a test
+ * can verify the same tokens without this class (§10.4).
+ */
+public final class MemoryTokenVerifier implements TokenVerifier {
+
+    MemIdentityState st;
+
+    MemoryTokenVerifier(MemIdentityState st) {
+        this.st #= st;
+        return;
+    }
+
+    public #Claims verify(String token, int32 expectedUse) {
+        LockGuard g #= this.st.lock.acquire();
+        return this.st.verify(token, expectedUse, "verify");
+    }
+
+    public #Jwks jwks() {
+        LockGuard g #= this.st.lock.acquire();
+        return this.st.jwks();
+    }
+}

@@ -1,0 +1,892 @@
+package dev.cajeta.cloud.testkit;
+
+import cajeta.codec.Base32;
+import cajeta.codec.Base64;
+import cajeta.codec.json.Json;
+import cajeta.codec.json.JsonArray;
+import cajeta.codec.json.JsonObject;
+import cajeta.codec.json.JsonValue;
+import cajeta.collection.ArrayList;
+import cajeta.hash.HmacSha256;
+import cajeta.hash.Totp;
+import cajeta.lang.String;
+import cajeta.time.Clock;
+import dev.cajeta.cloud.Capabilities;
+import dev.cajeta.cloud.CloudException;
+import dev.cajeta.cloud.identity.Account;
+import dev.cajeta.cloud.identity.Attributes;
+import dev.cajeta.cloud.identity.Authenticator;
+import dev.cajeta.cloud.identity.ChallengeAnswer;
+import dev.cajeta.cloud.identity.ChallengeKind;
+import dev.cajeta.cloud.identity.Claims;
+import dev.cajeta.cloud.identity.Factor;
+import dev.cajeta.cloud.identity.IdentityCapability;
+import dev.cajeta.cloud.identity.IdentityException;
+import dev.cajeta.cloud.identity.IdentityHooks;
+import dev.cajeta.cloud.identity.Jwks;
+import dev.cajeta.cloud.identity.ManualTimeSource;
+import dev.cajeta.cloud.identity.RegistrationResult;
+import dev.cajeta.cloud.identity.SignInResult;
+import dev.cajeta.cloud.identity.TokenUse;
+import dev.cajeta.cloud.identity.TokenVerifier;
+import dev.cajeta.cloud.identity.Tokens;
+import dev.cajeta.cloud.identity.TotpEnrollment;
+import dev.cajeta.cloud.identity.User;
+import dev.cajeta.cloud.identity.UserPool;
+
+/**
+ * The identity conformance suite over the full port (identity spec §4,
+ * §5, §6, §15; plan 3.2.4): sign-in, lockout, tokens and their
+ * verification, refresh and sign-out, codes, TOTP, passwordless access,
+ * code lockout, the self-service plane, password reset and redaction.
+ *
+ * A section that needs a delivered code is skipped without hooks, and
+ * one that needs to move time is skipped without a clock: a real
+ * provider cannot hand over either. A declared capability is exercised
+ * and an undeclared one must fail with unsupported-capability (§10.2).
+ * Each section can run alone through {@link #section}, which is how the
+ * selftest proves every section fails a driver that lies about it
+ * (§13.1).
+ */
+public final class AuthenticationContract {
+
+    static void check(boolean ok, String checkId, String detail) {
+        if (!ok) {
+            throw heap CloudException(CloudException.PROVIDER_ERROR(),
+                "contract", checkId, "-", detail);
+        }
+        return;
+    }
+
+    static #String pw() {
+        String p = "Xq7#contract-horse";
+        return #p;
+    }
+
+    static #String wrongPw() {
+        String p = "Xq7#not-the-horse";
+        return #p;
+    }
+
+    /** The section names, in the order {@link #verify} runs them. */
+    public static #String[] SECTIONS() {
+        String[] s = ["signin", "lockout", "tokens", "refresh", "otp", "totp",
+            "passwordless", "code-lockout", "account", "reset", "redaction"];
+        return #s;
+    }
+
+    /** Run every section. */
+    public static void verify(UserPool pool, IdentityHooks hooks,
+                              ManualTimeSource clock, String prefix) {
+        String[] names #= AuthenticationContract.SECTIONS();
+        int32 i = 0;
+        while (i < names.count()) {
+            AuthenticationContract.section(names[i], pool, hooks, clock,
+                prefix + names[i] + "-");
+            i = i + 1;
+        }
+        return;
+    }
+
+    /** Run one section by name; an unknown name is itself a violation. */
+    public static void section(String name, UserPool pool, IdentityHooks hooks,
+                               ManualTimeSource clock, String prefix) {
+        if (name.equals("signin")) { AuthenticationContract.signIn(pool, hooks, prefix); return; }
+        if (name.equals("lockout")) { AuthenticationContract.lockout(pool, hooks, clock, prefix); return; }
+        if (name.equals("tokens")) { AuthenticationContract.tokens(pool, hooks, clock, prefix); return; }
+        if (name.equals("refresh")) { AuthenticationContract.refresh(pool, hooks, prefix); return; }
+        if (name.equals("otp")) { AuthenticationContract.otp(pool, hooks, clock, prefix); return; }
+        if (name.equals("totp")) { AuthenticationContract.totp(pool, hooks, clock, prefix); return; }
+        if (name.equals("passwordless")) { AuthenticationContract.passwordless(pool, hooks, clock, prefix); return; }
+        if (name.equals("code-lockout")) { AuthenticationContract.codeLockout(pool, hooks, prefix); return; }
+        if (name.equals("account")) { AuthenticationContract.account(pool, hooks, clock, prefix); return; }
+        if (name.equals("reset")) { AuthenticationContract.reset(pool, hooks, prefix); return; }
+        if (name.equals("redaction")) { AuthenticationContract.redaction(pool, hooks, prefix); return; }
+        AuthenticationContract.check(false, "section-unknown",
+            "no contract section is named '" + name + "'");
+        return;
+    }
+
+    // --- helpers -----------------------------------------------------------
+
+    static int64 nowOf(ManualTimeSource clock) {
+        if (clock != null) { return clock.nowSeconds(); }
+        return Clock.millisTime() / 1000L;
+    }
+
+    static boolean has(UserPool pool, String capability) {
+        return pool.capabilities().supports(capability);
+    }
+
+    /**
+     * Register (with attributes when the driver takes them) and confirm
+     * through the hook; the subject, or "" when the user cannot be
+     * confirmed here (CONFIRMATION declared and no hook).
+     */
+    static #String ready(UserPool pool, IdentityHooks hooks, String name,
+                         String email) {
+        boolean confirmation = AuthenticationContract.has(pool,
+            IdentityCapability.CONFIRMATION());
+        if (confirmation && hooks == null) {
+            String none = "";
+            return #none;
+        }
+        String sub = "";
+        if (email.byteLength() > 0
+                && AuthenticationContract.has(pool,
+                    IdentityCapability.CUSTOM_ATTRIBUTES())) {
+            Attributes a = heap Attributes();
+            a.set("email", email);
+            a.set("phone_number", "+15555550111");
+            RegistrationResult r #= pool.registerWith(name,
+                AuthenticationContract.pw(), a);
+            sub #= r.subject();
+        } else {
+            RegistrationResult r #= pool.register(name,
+                AuthenticationContract.pw());
+            sub #= r.subject();
+        }
+        if (confirmation) {
+            String code #= hooks.lastConfirmationCode(sub);
+            pool.confirm(name, code);
+        }
+        return #sub;
+    }
+
+    static int32 signInKind(Authenticator a, String name, String password) {
+        try {
+            SignInResult r #= a.signIn(name, password);
+        } catch (IdentityException e) {
+            return e.kind();
+        }
+        return -1;
+    }
+
+    static #String signInMessage(Authenticator a, String name,
+                                 String password) {
+        String m = "";
+        try {
+            SignInResult r #= a.signIn(name, password);
+        } catch (IdentityException e) {
+            m #= "" + e.message;
+        }
+        return #m;
+    }
+
+    static int32 respondKind(Authenticator a, String session, int32 kind,
+                             String code) {
+        try {
+            SignInResult r #= a.respond(session, kind,
+                ChallengeAnswer.code(code));
+        } catch (IdentityException e) {
+            return e.kind();
+        }
+        return -1;
+    }
+
+    static int32 refreshKind(Authenticator a, String token) {
+        try {
+            Tokens t #= a.refresh(token);
+        } catch (IdentityException e) {
+            return e.kind();
+        }
+        return -1;
+    }
+
+    static int32 verifyKind(TokenVerifier v, String token, int32 use) {
+        try {
+            Claims c #= v.verify(token, use);
+        } catch (IdentityException e) {
+            return e.kind();
+        }
+        return -1;
+    }
+
+    static int32 meKind(Account acc, String token) {
+        try {
+            User u #= acc.me(token);
+        } catch (IdentityException e) {
+            return e.kind();
+        }
+        return -1;
+    }
+
+    /** A six-digit code that is not `code`. */
+    static #String other(String code) {
+        if (code.equals("000000")) {
+            String s = "111111";
+            return #s;
+        }
+        String s = "000000";
+        return #s;
+    }
+
+    static #String totpAt(String secret, int64 now) {
+        int8[] key #= Base32.decode(secret);
+        int32 c = Totp.code(key, (int64) key.count(), now, 30, 6);
+        return Totp.format(c, 6);
+    }
+
+    /** The access token of a password sign-in that answers tokens, or "". */
+    static #String accessOf(Authenticator a, String name, String password) {
+        SignInResult r #= a.signIn(name, password);
+        if (!r.isTokens()) {
+            String none = "";
+            return #none;
+        }
+        return r.tokens().accessToken();
+    }
+
+    static int32 dot(String t, int32 from) {
+        int32 i = from;
+        while (i < t.byteLength()) {
+            if (t.byteAt(i) == (int8) 46) { return i; }
+            i = i + 1;
+        }
+        return -1;
+    }
+
+    static #String text(int8[] b, int32 n) {
+        int8[] out = heap int8[(int64) n];
+        int32 i = 0;
+        while (i < n) { out[i] = b[i]; i = i + 1; }
+        String s = heap String(#out, n);
+        return #s;
+    }
+
+    /** A member of the JWKS's first key, or "". */
+    static #String jwksMember(String jwks, String name) {
+        JsonValue doc #= Json.parse(jwks);
+        JsonValue keysValue = doc.object().get("keys");
+        String none = "";
+        if (keysValue == null || keysValue.kind() != JsonValue.ARRAY) {
+            return #none;
+        }
+        JsonArray keys = keysValue.array();
+        if (keys.count() < 1) { return #none; }
+        JsonValue first = keys.get(0);
+        JsonValue v = first.object().get(name);
+        if (v == null || v.kind() != JsonValue.STRING) { return #none; }
+        return AuthenticationContract.text(v.asBytes(), v.asBytesLength());
+    }
+
+    /** HS256 over the token's first two segments, checked with the stdlib alone (§10.4). */
+    static boolean hs256Holds(String token, int8[] key, int64 keyLen) {
+        int32 a = AuthenticationContract.dot(token, 0);
+        if (a < 0) { return false; }
+        int32 b = AuthenticationContract.dot(token, a + 1);
+        if (b < 0) { return false; }
+        String input #= token.substring(0, b);
+        String sig #= token.substring(b + 1, token.byteLength());
+        int8[] in #= input.toBytes();
+        int8[] mac #= HmacSha256.mac(key, keyLen, in,
+            (int64) input.byteLength());
+        String expect #= Base64.encodeUrlSafe(mac, 32L);
+        return expect.equals(sig);
+    }
+
+    // --- §4.1 to §4.3, §15.14 ------------------------------------------------
+
+    static void signIn(UserPool pool, IdentityHooks hooks, String prefix) {
+        Authenticator a = pool.authenticator();
+        String name = prefix + "sam";
+        if (AuthenticationContract.has(pool, IdentityCapability.CONFIRMATION())) {
+            RegistrationResult u #= pool.register(prefix + "una",
+                AuthenticationContract.pw());
+            AuthenticationContract.check(AuthenticationContract.signInKind(a,
+                prefix + "una", AuthenticationContract.pw())
+                == IdentityException.NOT_CONFIRMED(), "signin-unconfirmed",
+                "an unconfirmed account must fail with not-confirmed (§4.3)");
+        }
+        String sub #= AuthenticationContract.ready(pool, hooks, name, "");
+        if (sub.byteLength() == 0) { return; }
+        SignInResult r #= a.signIn(name, AuthenticationContract.pw());
+        AuthenticationContract.check(r.isTokens()
+            && r.tokens().accessToken().byteLength() > 0
+            && r.tokens().idToken().byteLength() > 0, "signin-tokens",
+            "the right password must answer an access and an id token (§4.1, §5.1)");
+        AuthenticationContract.check(AuthenticationContract.signInKind(a, name,
+            AuthenticationContract.wrongPw())
+            == IdentityException.INVALID_CREDENTIALS(), "signin-wrong",
+            "a wrong password must fail with invalid-credentials (§4.2)");
+        String unknown = prefix + "nobody";
+        AuthenticationContract.check(AuthenticationContract.signInKind(a,
+            unknown, AuthenticationContract.wrongPw())
+            == IdentityException.INVALID_CREDENTIALS(), "signin-unknown",
+            "an unknown username must fail with invalid-credentials, as a "
+            + "wrong password does (§15.14)");
+        String m1 #= AuthenticationContract.signInMessage(a, name,
+            AuthenticationContract.wrongPw());
+        String m2 #= AuthenticationContract.signInMessage(a, unknown,
+            AuthenticationContract.wrongPw());
+        String d1 #= m1.replace(name, "<user>");
+        String d2 #= m2.replace(unknown, "<user>");
+        AuthenticationContract.check(d1.equals(d2), "signin-same-message",
+            "a wrong password and an unknown user must answer the same "
+            + "message but for the username (§4.2, §15.14)");
+        return;
+    }
+
+    // --- §4.4 ------------------------------------------------------------
+
+    static void lockout(UserPool pool, IdentityHooks hooks,
+                        ManualTimeSource clock, String prefix) {
+        Authenticator a = pool.authenticator();
+        String name = prefix + "lee";
+        String sub #= AuthenticationContract.ready(pool, hooks, name, "");
+        if (sub.byteLength() == 0) { return; }
+        int32 i = 0;
+        boolean locked = false;
+        while (i < 20 && !locked) {
+            locked = AuthenticationContract.signInKind(a, name,
+                AuthenticationContract.wrongPw()) == IdentityException.LOCKED();
+            i = i + 1;
+        }
+        AuthenticationContract.check(locked, "lockout-locks",
+            "twenty wrong passwords must reach locked (§4.4)");
+        int64 wait = -1L;
+        int32 kind = -1;
+        try {
+            SignInResult r #= a.signIn(name, AuthenticationContract.pw());
+        } catch (IdentityException e) {
+            kind = e.kind();
+            wait = e.retryAfter();
+        }
+        AuthenticationContract.check(kind == IdentityException.LOCKED(),
+            "lockout-holds", "the right password must still fail while locked");
+        if (clock != null && wait > 0L) {
+            clock.advance(wait);
+            AuthenticationContract.check(AuthenticationContract.signInKind(a,
+                name, AuthenticationContract.pw()) == -1, "lockout-lifts",
+                "the right password must sign in once the retry-after passes");
+        }
+        return;
+    }
+
+    // --- §5 ------------------------------------------------------------
+
+    static void tokens(UserPool pool, IdentityHooks hooks,
+                       ManualTimeSource clock, String prefix) {
+        Authenticator a = pool.authenticator();
+        TokenVerifier v = pool.verifier();
+        String name = prefix + "tia";
+        String sub #= AuthenticationContract.ready(pool, hooks, name,
+            "tia@example.test");
+        if (!AuthenticationContract.has(pool, IdentityCapability.JWKS())) {
+            int32 k = -1;
+            try {
+                Jwks j #= v.jwks();
+            } catch (IdentityException e) {
+                k = e.kind();
+            }
+            AuthenticationContract.check(
+                k == IdentityException.UNSUPPORTED_CAPABILITY(),
+                "jwks-undeclared", "jwks without the capability must fail naming it");
+        }
+        if (sub.byteLength() == 0) { return; }
+        boolean groups = AuthenticationContract.has(pool,
+            IdentityCapability.GROUPS());
+        if (groups) { pool.addToGroup(sub, "readers"); }
+        SignInResult r #= a.signIn(name, AuthenticationContract.pw());
+        Tokens t = r.tokens();
+        String access #= t.accessToken();
+        String idt #= t.idToken();
+        Claims c #= v.verify(access, TokenUse.ACCESS());
+        AuthenticationContract.check(c.subject().equals(sub)
+            && c.username().equals(name)
+            && c.tokenUse() == TokenUse.ACCESS()
+            && c.issuer().byteLength() > 0 && c.audience().byteLength() > 0
+            && c.expiresAt() == t.accessExpiresAt(), "token-claims",
+            "access claims carry subject, username, issuer, audience, expiry "
+            + "and use (§5.2, §15.10)");
+        AuthenticationContract.check(!groups || c.inGroup("readers"),
+            "token-groups", "claims carry the user's groups (§5.2)");
+        Claims ic #= v.verify(idt, TokenUse.ID());
+        AuthenticationContract.check(ic.subject().equals(sub)
+            && ic.tokenUse() == TokenUse.ID(), "token-id-claims",
+            "the id token verifies as an id token for the same subject");
+        AuthenticationContract.check(AuthenticationContract.verifyKind(v,
+            access, TokenUse.ID()) == IdentityException.INVALID_TOKEN(),
+            "token-use", "an access token must fail verification as an id token");
+        int32 sigAt = AuthenticationContract.dot(access,
+            AuthenticationContract.dot(access, 0) + 1) + 1;
+        String repl = "A";
+        if (access.byteAt(sigAt) == (int8) 65) { repl = "B"; }
+        String tampered #= access.substring(0, sigAt) + repl
+            + access.substring(sigAt + 1, access.byteLength());
+        AuthenticationContract.check(AuthenticationContract.verifyKind(v,
+            tampered, TokenUse.ACCESS()) == IdentityException.INVALID_TOKEN(),
+            "token-signature", "a changed signature must fail verification");
+        AuthenticationContract.check(AuthenticationContract.verifyKind(v,
+            "x.y", TokenUse.ACCESS()) == IdentityException.INVALID_TOKEN(),
+            "token-malformed", "a malformed token must fail verification");
+        if (AuthenticationContract.has(pool, IdentityCapability.JWKS())) {
+            Jwks keys #= v.jwks();
+            String doc #= keys.json();
+            String kty #= AuthenticationContract.jwksMember(doc, "kty");
+            if (kty.equals("oct")) {
+                String k #= AuthenticationContract.jwksMember(doc, "k");
+                int8[] key #= Base64.decode(k);
+                AuthenticationContract.check(
+                    AuthenticationContract.hs256Holds(access, key,
+                        (int64) key.count()), "token-jwks",
+                    "a token must verify independently over the published "
+                    + "JWKS, not only through the driver's verifier (§10.4)");
+            }
+        }
+        if (clock != null) {
+            clock.set(t.accessExpiresAt() + 1L);
+            AuthenticationContract.check(AuthenticationContract.verifyKind(v,
+                access, TokenUse.ACCESS()) == IdentityException.INVALID_TOKEN(),
+                "token-expiry", "an expired token must fail verification");
+        }
+        return;
+    }
+
+    // --- §4.5, §4.6, §15.7, §15.8 -----------------------------------------
+
+    static void refresh(UserPool pool, IdentityHooks hooks, String prefix) {
+        Authenticator a = pool.authenticator();
+        if (!AuthenticationContract.has(pool, IdentityCapability.REFRESH())) {
+            AuthenticationContract.check(AuthenticationContract.refreshKind(a,
+                "anything") == IdentityException.UNSUPPORTED_CAPABILITY(),
+                "refresh-undeclared",
+                "refresh without the capability must fail naming it");
+        }
+        if (!AuthenticationContract.has(pool, IdentityCapability.REVOCATION())) {
+            int32 k = -1;
+            try {
+                a.signOut("anything");
+            } catch (IdentityException e) {
+                k = e.kind();
+            }
+            AuthenticationContract.check(
+                k == IdentityException.UNSUPPORTED_CAPABILITY(),
+                "signout-undeclared",
+                "signOut without the capability must fail naming it");
+        }
+        if (!AuthenticationContract.has(pool, IdentityCapability.REFRESH())) {
+            return;
+        }
+        String name = prefix + "rex";
+        String sub #= AuthenticationContract.ready(pool, hooks, name, "");
+        if (sub.byteLength() == 0) { return; }
+        SignInResult r #= a.signIn(name, AuthenticationContract.pw());
+        String rt #= r.tokens().refreshToken();
+        AuthenticationContract.check(rt.byteLength() > 0, "refresh-issued",
+            "a driver declaring REFRESH issues a refresh token at sign-in");
+        Tokens t2 #= a.refresh(rt);
+        Claims c #= pool.verifier().verify(t2.accessToken(), TokenUse.ACCESS());
+        AuthenticationContract.check(c.subject().equals(sub), "refresh-tokens",
+            "a refresh issues tokens for the same subject (§4.5)");
+        AuthenticationContract.check(AuthenticationContract.refreshKind(a,
+            "not-a-refresh-token") == IdentityException.INVALID_TOKEN(),
+            "refresh-unknown", "an unknown refresh token fails with invalid-token");
+        if (AuthenticationContract.has(pool, IdentityCapability.REVOCATION())) {
+            String live #= rt;
+            if (t2.hasRefreshToken()) { live #= t2.refreshToken(); }
+            a.signOut(live);
+            AuthenticationContract.check(AuthenticationContract.refreshKind(a,
+                live) == IdentityException.INVALID_TOKEN(), "refresh-revoked",
+                "a signed-out refresh token fails with invalid-token (§4.6)");
+        }
+        return;
+    }
+
+    // --- §6.2, §6.5, §15.18.2 -------------------------------------------
+
+    static void otpFactor(UserPool pool, IdentityHooks hooks,
+                          ManualTimeSource clock, String prefix,
+                          int32 factor, int32 kind, String capability,
+                          String label) {
+        Authenticator a = pool.authenticator();
+        String name = prefix + label;
+        if (!AuthenticationContract.has(pool, capability)) {
+            int32 k = -1;
+            try {
+                SignInResult r #= a.signInWith(name, factor);
+            } catch (IdentityException e) {
+                k = e.kind();
+            }
+            AuthenticationContract.check(
+                k == IdentityException.UNSUPPORTED_CAPABILITY(),
+                "otp-undeclared",
+                "a code factor without its capability must fail naming it");
+            return;
+        }
+        if (hooks == null) { return; }
+        String sub #= AuthenticationContract.ready(pool, hooks, name,
+            label + "@example.test");
+        if (sub.byteLength() == 0) { return; }
+        SignInResult r #= a.signInWith(name, factor);
+        AuthenticationContract.check(r.isChallenge()
+            && r.challenge().kind() == kind, "otp-challenge",
+            "a code factor answers challenge-required of its kind (§15.18.2)");
+        String s1 #= r.challenge().session();
+        String code #= hooks.lastSignInCode(sub);
+        String wrong #= AuthenticationContract.other(code);
+        AuthenticationContract.check(AuthenticationContract.respondKind(a, s1,
+            kind, wrong) == IdentityException.INVALID_CODE(), "otp-wrong",
+            "a wrong code fails with invalid-code (§6.2)");
+        SignInResult ok #= a.respond(s1, kind, ChallengeAnswer.code(code));
+        AuthenticationContract.check(ok.isTokens(), "otp-complete",
+            "the delivered code completes sign-in with tokens (§6.2)");
+        if (clock != null) {
+            SignInResult r2 #= a.signInWith(name, factor);
+            String s2 #= r2.challenge().session();
+            String code2 #= hooks.lastSignInCode(sub);
+            clock.advance(86400L);
+            AuthenticationContract.check(AuthenticationContract.respondKind(a,
+                s2, kind, code2) == IdentityException.CODE_EXPIRED(),
+                "otp-expired", "a code a day old fails with code-expired (§6.2)");
+        }
+        return;
+    }
+
+    static void otp(UserPool pool, IdentityHooks hooks, ManualTimeSource clock,
+                    String prefix) {
+        AuthenticationContract.otpFactor(pool, hooks, clock, prefix,
+            Factor.EMAIL_OTP(), ChallengeKind.EMAIL_OTP(),
+            IdentityCapability.EMAIL_OTP(), "em");
+        AuthenticationContract.otpFactor(pool, hooks, clock, prefix,
+            Factor.SMS_OTP(), ChallengeKind.SMS_OTP(),
+            IdentityCapability.SMS_OTP(), "sm");
+        return;
+    }
+
+    // --- §6.3, §15.6, §15.18.3, §15.18.5 ------------------------------------
+
+    static void totp(UserPool pool, IdentityHooks hooks, ManualTimeSource clock,
+                     String prefix) {
+        Authenticator a = pool.authenticator();
+        Account acc = pool.account();
+        String name = prefix + "tom";
+        String sub #= AuthenticationContract.ready(pool, hooks, name, "");
+        if (sub.byteLength() == 0) { return; }
+        String access #= AuthenticationContract.accessOf(a, name,
+            AuthenticationContract.pw());
+        if (!AuthenticationContract.has(pool, IdentityCapability.TOTP())) {
+            int32 k = -1;
+            try {
+                TotpEnrollment e #= acc.enrollTotp(access);
+            } catch (IdentityException e) {
+                k = e.kind();
+            }
+            AuthenticationContract.check(
+                k == IdentityException.UNSUPPORTED_CAPABILITY(),
+                "totp-undeclared", "enrollTotp without the capability must fail naming it");
+            return;
+        }
+        TotpEnrollment en #= acc.enrollTotp(access);
+        String secret #= en.secret();
+        String uri #= en.uri();
+        AuthenticationContract.check(uri.startsWith("otpauth://totp/")
+            && uri.contains("secret=" + secret), "totp-uri",
+            "enrollment returns the Base32 secret and its otpauth URI (§15.18.3)");
+        int64 now = AuthenticationContract.nowOf(clock);
+        String first #= AuthenticationContract.totpAt(secret, now);
+        int32 k = -1;
+        try {
+            acc.activateTotp(access, AuthenticationContract.other(first));
+        } catch (IdentityException e) {
+            k = e.kind();
+        }
+        AuthenticationContract.check(k == IdentityException.INVALID_CODE(),
+            "totp-wrong-activation", "a wrong first code must not activate (§6.3)");
+        acc.activateTotp(access, first);
+        if (clock == null) { return; }
+        clock.advance(30L);
+        SignInResult r #= a.signIn(name, AuthenticationContract.pw());
+        AuthenticationContract.check(r.isChallenge()
+            && r.challenge().kind() == ChallengeKind.TOTP(), "totp-challenge",
+            "an active authenticator makes password sign-in answer TOTP (§6.1)");
+        String s1 #= r.challenge().session();
+        String code #= AuthenticationContract.totpAt(secret, clock.nowSeconds());
+        AuthenticationContract.check(AuthenticationContract.respondKind(a, s1,
+            ChallengeKind.TOTP(), AuthenticationContract.other(code))
+            == IdentityException.INVALID_CODE(), "totp-wrong",
+            "a wrong TOTP code fails with invalid-code");
+        SignInResult ok #= a.respond(s1, ChallengeKind.TOTP(),
+            ChallengeAnswer.code(code));
+        AuthenticationContract.check(ok.isTokens(), "totp-complete",
+            "the authenticator's code completes sign-in (§6.2)");
+        SignInResult again #= a.signIn(name, AuthenticationContract.pw());
+        String s2 #= again.challenge().session();
+        AuthenticationContract.check(AuthenticationContract.respondKind(a, s2,
+            ChallengeKind.TOTP(), code) == IdentityException.INVALID_CODE(),
+            "totp-replay", "a code is accepted once (§15.18.5)");
+        return;
+    }
+
+    // --- §15.18.1, §15.18.4 ------------------------------------------------
+
+    static void passwordless(UserPool pool, IdentityHooks hooks,
+                             ManualTimeSource clock, String prefix) {
+        Authenticator a = pool.authenticator();
+        String name = prefix + "pat";
+        Attributes attrs = heap Attributes();
+        if (AuthenticationContract.has(pool, IdentityCapability.CUSTOM_ATTRIBUTES())) {
+            attrs.set("email", "pat@example.test");
+        }
+        if (!AuthenticationContract.has(pool, IdentityCapability.PASSWORDLESS())) {
+            int32 k = -1;
+            try {
+                RegistrationResult r #= pool.registerPasswordless(name, attrs);
+            } catch (IdentityException e) {
+                k = e.kind();
+            }
+            AuthenticationContract.check(
+                k == IdentityException.UNSUPPORTED_CAPABILITY(),
+                "passwordless-undeclared",
+                "registerPasswordless without the capability must fail naming it");
+        }
+        if (!AuthenticationContract.has(pool, IdentityCapability.TOTP_SIGN_IN())) {
+            int32 k = -1;
+            try {
+                SignInResult r #= a.signInWith(name, Factor.TOTP());
+            } catch (IdentityException e) {
+                k = e.kind();
+            }
+            AuthenticationContract.check(
+                k == IdentityException.UNSUPPORTED_CAPABILITY(),
+                "totp-sign-in-undeclared",
+                "TOTP as the only factor without TOTP_SIGN_IN must fail naming it");
+        }
+        if (!AuthenticationContract.has(pool, IdentityCapability.PASSWORDLESS())
+                || hooks == null) {
+            return;
+        }
+        RegistrationResult rr #= pool.registerPasswordless(name, attrs);
+        String sub #= rr.subject();
+        if (AuthenticationContract.has(pool, IdentityCapability.CONFIRMATION())) {
+            String cc #= hooks.lastConfirmationCode(sub);
+            pool.confirm(name, cc);
+        }
+        AuthenticationContract.check(AuthenticationContract.signInKind(a, name,
+            AuthenticationContract.pw()) == IdentityException.INVALID_CREDENTIALS()
+            && AuthenticationContract.signInKind(a, name, "")
+            == IdentityException.INVALID_CREDENTIALS(),
+            "passwordless-no-password",
+            "an account without a password never signs in with one (§15.18.1)");
+        if (!AuthenticationContract.has(pool, IdentityCapability.EMAIL_OTP())) {
+            return;
+        }
+        SignInResult r #= a.signInWith(name, Factor.EMAIL_OTP());
+        String s1 #= r.challenge().session();
+        String code #= hooks.lastSignInCode(sub);
+        SignInResult ok #= a.respond(s1, ChallengeKind.EMAIL_OTP(),
+            ChallengeAnswer.code(code));
+        AuthenticationContract.check(ok.isTokens(), "passwordless-otp",
+            "a passwordless account signs in with an emailed code (§15.18.2)");
+        if (!AuthenticationContract.has(pool, IdentityCapability.TOTP_SIGN_IN())
+                || clock == null) {
+            return;
+        }
+        String access #= ok.tokens().accessToken();
+        TotpEnrollment en #= pool.account().enrollTotp(access);
+        String secret #= en.secret();
+        String first #= AuthenticationContract.totpAt(secret, clock.nowSeconds());
+        pool.account().activateTotp(access, first);
+        clock.advance(30L);
+        SignInResult t #= a.signInWith(name, Factor.TOTP());
+        String s2 #= t.challenge().session();
+        String now #= AuthenticationContract.totpAt(secret, clock.nowSeconds());
+        SignInResult done #= a.respond(s2, ChallengeKind.TOTP(),
+            ChallengeAnswer.code(now));
+        AuthenticationContract.check(done.isTokens(), "passwordless-totp",
+            "under TOTP_SIGN_IN the authenticator alone signs in (§15.18.4)");
+        return;
+    }
+
+    // --- §15.18.8 --------------------------------------------------------
+
+    static void codeLockout(UserPool pool, IdentityHooks hooks, String prefix) {
+        if (!AuthenticationContract.has(pool, IdentityCapability.EMAIL_OTP())
+                || hooks == null) {
+            return;
+        }
+        Authenticator a = pool.authenticator();
+        String name = prefix + "cal";
+        String sub #= AuthenticationContract.ready(pool, hooks, name,
+            "cal@example.test");
+        if (sub.byteLength() == 0) { return; }
+        SignInResult r #= a.signInWith(name, Factor.EMAIL_OTP());
+        String s #= r.challenge().session();
+        String code #= hooks.lastSignInCode(sub);
+        String wrong #= AuthenticationContract.other(code);
+        int32 i = 0;
+        boolean locked = false;
+        while (i < 20 && !locked) {
+            locked = AuthenticationContract.respondKind(a, s,
+                ChallengeKind.EMAIL_OTP(), wrong) == IdentityException.LOCKED();
+            i = i + 1;
+        }
+        AuthenticationContract.check(locked
+            && AuthenticationContract.respondKind(a, s, ChallengeKind.EMAIL_OTP(),
+                code) == IdentityException.LOCKED(), "code-lockout",
+            "wrong codes count against the lockout, and the right code fails "
+            + "while it holds (§15.18.8)");
+        return;
+    }
+
+    // --- §15.1 ----------------------------------------------------------
+
+    static void account(UserPool pool, IdentityHooks hooks,
+                        ManualTimeSource clock, String prefix) {
+        Authenticator a = pool.authenticator();
+        Account acc = pool.account();
+        String name = prefix + "ada";
+        String sub #= AuthenticationContract.ready(pool, hooks, name, "");
+        if (sub.byteLength() == 0) { return; }
+        SignInResult r #= a.signIn(name, AuthenticationContract.pw());
+        String access #= r.tokens().accessToken();
+        User me #= acc.me(access);
+        AuthenticationContract.check(me.subject().equals(sub)
+            && me.username().equals(name), "account-me",
+            "me answers the caller's own user (§15.1)");
+        Attributes upd = heap Attributes();
+        upd.set("nick", "a");
+        if (AuthenticationContract.has(pool, IdentityCapability.CUSTOM_ATTRIBUTES())) {
+            acc.updateAttributes(access, upd);
+            User me2 #= acc.me(access);
+            AuthenticationContract.check(
+                me2.attributes().get("nick").equals("a"), "account-attributes",
+                "updateAttributes takes effect for the caller");
+        } else {
+            int32 k = -1;
+            try {
+                acc.updateAttributes(access, upd);
+            } catch (IdentityException e) {
+                k = e.kind();
+            }
+            AuthenticationContract.check(
+                k == IdentityException.UNSUPPORTED_CAPABILITY(),
+                "account-attributes-undeclared",
+                "updateAttributes without the capability must fail naming it");
+        }
+        acc.changePassword(access, AuthenticationContract.pw(), "Xq7#new-horse");
+        AuthenticationContract.check(AuthenticationContract.signInKind(a, name,
+            "Xq7#new-horse") == -1 && AuthenticationContract.signInKind(a, name,
+            AuthenticationContract.pw()) == IdentityException.INVALID_CREDENTIALS(),
+            "account-password", "changePassword replaces the password");
+        if (AuthenticationContract.has(pool, IdentityCapability.REVOCATION())
+                && AuthenticationContract.has(pool, IdentityCapability.REFRESH())) {
+            SignInResult r2 #= a.signIn(name, "Xq7#new-horse");
+            String access2 #= r2.tokens().accessToken();
+            String rt2 #= r2.tokens().refreshToken();
+            a.signOut(rt2);
+            AuthenticationContract.check(AuthenticationContract.meKind(acc,
+                access2) == IdentityException.INVALID_TOKEN(), "account-revoked",
+                "a signed-out session's token fails Account calls (§15.1)");
+            SignInResult r3 #= a.signIn(name, "Xq7#new-horse");
+            SignInResult r4 #= a.signIn(name, "Xq7#new-horse");
+            String access3 #= r3.tokens().accessToken();
+            String access4 #= r4.tokens().accessToken();
+            acc.signOutEverywhere(access3);
+            AuthenticationContract.check(AuthenticationContract.meKind(acc,
+                access4) == IdentityException.INVALID_TOKEN(), "account-everywhere",
+                "signOutEverywhere ends every session of the caller (§15.8)");
+        }
+        if (clock != null) {
+            SignInResult r5 #= a.signIn(name, "Xq7#new-horse");
+            String access5 #= r5.tokens().accessToken();
+            clock.set(r5.tokens().accessExpiresAt() + 1L);
+            AuthenticationContract.check(AuthenticationContract.meKind(acc,
+                access5) == IdentityException.INVALID_TOKEN(), "account-expired",
+                "an expired token fails Account calls");
+        }
+        String access6 #= AuthenticationContract.accessOf(a, name,
+            "Xq7#new-horse");
+        acc.deleteMe(access6);
+        int32 gone = -1;
+        try {
+            User u #= pool.lookupBySubject(sub);
+        } catch (IdentityException e) {
+            gone = e.kind();
+        }
+        AuthenticationContract.check(gone == IdentityException.USER_NOT_FOUND(),
+            "account-delete", "deleteMe removes the caller's account");
+        return;
+    }
+
+    // --- §15.9 ----------------------------------------------------------
+
+    static void reset(UserPool pool, IdentityHooks hooks, String prefix) {
+        Authenticator a = pool.authenticator();
+        String name = prefix + "ria";
+        if (!AuthenticationContract.has(pool, IdentityCapability.PASSWORD_RESET())) {
+            int32 k = -1;
+            try {
+                a.forgotPassword(name);
+            } catch (IdentityException e) {
+                k = e.kind();
+            }
+            AuthenticationContract.check(
+                k == IdentityException.UNSUPPORTED_CAPABILITY(),
+                "reset-undeclared",
+                "forgotPassword without the capability must fail naming it");
+            return;
+        }
+        a.forgotPassword(prefix + "nobody");
+        if (hooks == null) { return; }
+        String sub #= AuthenticationContract.ready(pool, hooks, name, "");
+        if (sub.byteLength() == 0) { return; }
+        a.forgotPassword(name);
+        String code #= hooks.lastPasswordResetCode(sub);
+        int32 k = -1;
+        try {
+            a.confirmForgotPassword(name, AuthenticationContract.other(code),
+                "Xq7#reset-horse");
+        } catch (IdentityException e) {
+            k = e.kind();
+        }
+        AuthenticationContract.check(k == IdentityException.INVALID_CODE(),
+            "reset-wrong", "a wrong reset code fails with invalid-code");
+        a.confirmForgotPassword(name, code, "Xq7#reset-horse");
+        AuthenticationContract.check(AuthenticationContract.signInKind(a, name,
+            "Xq7#reset-horse") == -1, "reset-complete",
+            "the delivered code sets the new password (§15.9)");
+        return;
+    }
+
+    // --- §11.3, §13.6 -----------------------------------------------------
+
+    static void keep(ArrayList<String> out, IdentityException e) {
+        String m = "" + e.message;
+        out.add(#m);
+        return;
+    }
+
+    static void redaction(UserPool pool, IdentityHooks hooks, String prefix) {
+        Authenticator a = pool.authenticator();
+        String name = prefix + "red";
+        String sub #= AuthenticationContract.ready(pool, hooks, name, "");
+        if (sub.byteLength() == 0) { return; }
+        ArrayList<String> said = heap ArrayList<String>();
+        try { SignInResult x #= a.signIn(name, AuthenticationContract.wrongPw()); }
+        catch (IdentityException e) { AuthenticationContract.keep(said, e); }
+        try { RegistrationResult x #= pool.register(prefix + "short", "Zz9!"); }
+        catch (IdentityException e) { AuthenticationContract.keep(said, e); }
+        SignInResult r #= a.signIn(name, AuthenticationContract.pw());
+        String access #= r.tokens().accessToken();
+        try { Claims x #= pool.verifier().verify(access + "x", TokenUse.ACCESS()); }
+        catch (IdentityException e) { AuthenticationContract.keep(said, e); }
+        String red #= r.tokens().redacted();
+        said.add(#red);
+        int32 i = 0;
+        boolean clean = true;
+        while (i < said.count()) {
+            String m = said.get(i);
+            if (m.contains(AuthenticationContract.wrongPw())
+                    || m.contains(AuthenticationContract.pw())
+                    || m.contains("Zz9!") || m.contains(access)) {
+                clean = false;
+            }
+            i = i + 1;
+        }
+        AuthenticationContract.check(clean, "redaction",
+            "no error message and no redacted form may carry a password or a "
+            + "raw token (§11.3, §13.6)");
+        return;
+    }
+}

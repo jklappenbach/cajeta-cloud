@@ -1,0 +1,19 @@
+package dev.cajeta.cloud.identity;
+
+import cajeta.lang.String;
+
+/**
+ * Token verification (identity spec §5.3, §15.10): signature, issuer,
+ * audience (an id token's `aud`, an access token's `client_id`), expiry
+ * and use. A failure is invalid-token and its message names the check
+ * that failed, never the token. An access token stays valid until it
+ * expires even after sign-out (§4.6): verification is offline.
+ */
+public interface TokenVerifier {
+
+    /** The verified claims; `expectedUse` is a {@link TokenUse} value. */
+    #Claims verify(String token, int32 expectedUse);
+
+    /** The keys tokens are signed with (§5.4). */
+    #Jwks jwks();
+}

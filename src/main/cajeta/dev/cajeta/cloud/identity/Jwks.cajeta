@@ -1,0 +1,25 @@
+package dev.cajeta.cloud.identity;
+
+import cajeta.lang.String;
+
+/**
+ * A pool's signing keys as a JWKS document (identity spec §5.4). An
+ * adapter fetches it from the provider's discovery endpoint; the memory
+ * driver serves its per-process HS256 key from memory (§5.5), so code
+ * that verifies tokens is written once.
+ */
+public final class Jwks {
+
+    String doc;
+
+    public Jwks(String json) {
+        this.doc = "" + json;
+        return;
+    }
+
+    /** The JWKS JSON: `{"keys":[...]}`. */
+    public #String json() {
+        String out = "" + this.doc;
+        return #out;
+    }
+}

@@ -1,0 +1,66 @@
+package dev.cajeta.cloud.identity;
+
+import cajeta.lang.String;
+
+/**
+ * What a successful sign-in or refresh returns (identity spec §5.1): an
+ * access token, an id token and, where the provider issues one, a
+ * refresh token, each with its expiry in epoch seconds. A refresh may
+ * return no refresh token (§15.7): {@link #refreshToken} is then empty
+ * and the caller keeps the one it has. The raw tokens are secrets, so
+ * {@link #redacted} is the only form fit for a log (§5.7).
+ */
+public final class Tokens {
+
+    String access;
+    String idTok;
+    String refresh;
+    int64 accessExp;
+    int64 idExp;
+    int64 refreshExp;
+    String sub;
+
+    public Tokens(String accessToken, String idToken, String refreshToken,
+                  int64 accessExpiresAt, int64 idExpiresAt,
+                  int64 refreshExpiresAt, String subject) {
+        this.access = "" + accessToken;
+        this.idTok = "" + idToken;
+        this.refresh = "" + refreshToken;
+        this.accessExp = accessExpiresAt;
+        this.idExp = idExpiresAt;
+        this.refreshExp = refreshExpiresAt;
+        this.sub = "" + subject;
+        return;
+    }
+
+    public #String accessToken() {
+        String out = "" + this.access;
+        return #out;
+    }
+
+    public #String idToken() {
+        String out = "" + this.idTok;
+        return #out;
+    }
+
+    /** The refresh token, or "" when the provider issued none (§15.7). */
+    public #String refreshToken() {
+        String out = "" + this.refresh;
+        return #out;
+    }
+
+    public boolean hasRefreshToken() { return this.refresh.byteLength() > 0; }
+
+    public int64 accessExpiresAt() { return this.accessExp; }
+
+    public int64 idExpiresAt() { return this.idExp; }
+
+    /** Epoch seconds, or 0 when there is no refresh token. */
+    public int64 refreshExpiresAt() { return this.refreshExp; }
+
+    /** The subject and expiry only, never a token (§5.7). */
+    public #String redacted() {
+        String out #= "Tokens(sub=" + this.sub + ", exp=" + this.accessExp + ")";
+        return #out;
+    }
+}

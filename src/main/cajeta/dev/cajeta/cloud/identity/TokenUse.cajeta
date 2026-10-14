@@ -1,0 +1,8 @@
+package dev.cajeta.cloud.identity;
+
+/** Which token a verification expects (identity spec §15.10). */
+public final class TokenUse {
+
+    public static int32 ACCESS() { return 0; }
+    public static int32 ID()     { return 1; }
+}

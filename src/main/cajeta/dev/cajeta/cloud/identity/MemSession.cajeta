@@ -1,0 +1,26 @@
+package dev.cajeta.cloud.identity;
+
+import cajeta.lang.String;
+
+/**
+ * An open challenge (identity spec §6): who it is for, what it asks, the
+ * code it expects for EMAIL_OTP and SMS_OTP, the pending secret for
+ * MFA_SETUP, and when it lapses. A session for an unknown username has
+ * an empty subject and can never succeed (§15.14).
+ */
+final class MemSession {
+
+    String subject;
+    int32 kind;
+    String code;
+    int64 expiresAt;
+    int8[] pending;
+
+    MemSession(String subject, int32 kind, #String code, int64 expiresAt) {
+        this.subject = "" + subject;
+        this.kind = kind;
+        this.code #= code;
+        this.expiresAt = expiresAt;
+        return;
+    }
+}

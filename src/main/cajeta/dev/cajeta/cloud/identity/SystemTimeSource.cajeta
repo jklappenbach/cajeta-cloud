@@ -1,0 +1,11 @@
+package dev.cajeta.cloud.identity;
+
+import cajeta.time.Clock;
+
+/** The wall clock: what a pool uses when nobody hands it one. */
+public final class SystemTimeSource implements TimeSource {
+
+    public SystemTimeSource() { return; }
+
+    public int64 nowSeconds() { return Clock.millisTime() / 1000L; }
+}

@@ -1,0 +1,12 @@
+package dev.cajeta.cloud.identity;
+
+/**
+ * The clock the identity drivers read for token expiry, code expiry,
+ * lockout backoff and TOTP steps (identity spec §6.5). Tests hand the
+ * memory driver a {@link ManualTimeSource} so time is theirs to move.
+ */
+public interface TimeSource {
+
+    /** Seconds since the Unix epoch. */
+    int64 nowSeconds();
+}

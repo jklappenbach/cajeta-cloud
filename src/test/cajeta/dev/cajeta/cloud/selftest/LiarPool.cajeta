@@ -1,0 +1,113 @@
+package dev.cajeta.cloud.selftest;
+
+import cajeta.lang.String;
+import dev.cajeta.cloud.Capabilities;
+import dev.cajeta.cloud.identity.Account;
+import dev.cajeta.cloud.identity.Attributes;
+import dev.cajeta.cloud.identity.Authenticator;
+import dev.cajeta.cloud.identity.MemoryIdentityHooks;
+import dev.cajeta.cloud.identity.MemoryUserPool;
+import dev.cajeta.cloud.identity.RegistrationResult;
+import dev.cajeta.cloud.identity.TimeSource;
+import dev.cajeta.cloud.identity.TokenVerifier;
+import dev.cajeta.cloud.identity.User;
+import dev.cajeta.cloud.identity.UserPool;
+
+/**
+ * A DELIBERATELY BROKEN identity driver (identity plan 3.3.2): the memory
+ * driver with one plane made to lie, chosen by a {@link Lie}. Success is
+ * fabricated from a hidden account the liar signs in itself, so a lie
+ * produces real tokens for the wrong user. With Lie.NONE it is honest
+ * and must pass the whole contract, which proves the wrapper is not
+ * what fails.
+ */
+final class LiarPool implements UserPool {
+
+    MemoryUserPool inner;
+    LiarAuthenticator auth;
+    LiarVerifier ver;
+    LiarAccount acct;
+
+    static #String MASTER() {
+        String s = "liar-master";
+        return #s;
+    }
+
+    static #String MASTER_PW() {
+        String s = "Xq7#master-horse";
+        return #s;
+    }
+
+    LiarPool(int32 lie, TimeSource clock) {
+        this.inner #= MemoryUserPool.withClock(clock);
+        RegistrationResult r #= this.inner.register(LiarPool.MASTER(),
+            LiarPool.MASTER_PW());
+        String code #= this.inner.hooks().lastConfirmationCode(r.subject());
+        this.inner.confirm(LiarPool.MASTER(), code);
+        this.auth #= heap LiarAuthenticator(this.inner, lie);
+        this.ver #= heap LiarVerifier(this.inner, lie);
+        this.acct #= heap LiarAccount(this.inner, lie);
+        return;
+    }
+
+    MemoryIdentityHooks hooks() { return this.inner.hooks(); }
+
+    public Capabilities capabilities() { return this.inner.capabilities(); }
+
+    public #RegistrationResult register(String username, String password) {
+        return this.inner.register(username, password);
+    }
+
+    public #RegistrationResult registerWith(String username, String password,
+                                            Attributes attributes) {
+        return this.inner.registerWith(username, password, attributes);
+    }
+
+    public #RegistrationResult registerPasswordless(String username,
+                                                    Attributes attributes) {
+        return this.inner.registerPasswordless(username, attributes);
+    }
+
+    public void confirm(String username, String code) {
+        this.inner.confirm(username, code);
+        return;
+    }
+
+    public #User lookupBySubject(String subject) {
+        return this.inner.lookupBySubject(subject);
+    }
+
+    public #User lookupByName(String username) {
+        return this.inner.lookupByName(username);
+    }
+
+    public boolean delete(String subject) { return this.inner.delete(subject); }
+
+    public void setAttribute(String subject, String name, String value) {
+        this.inner.setAttribute(subject, name, value);
+        return;
+    }
+
+    public void removeAttribute(String subject, String name) {
+        this.inner.removeAttribute(subject, name);
+        return;
+    }
+
+    public void addToGroup(String subject, String group) {
+        this.inner.addToGroup(subject, group);
+        return;
+    }
+
+    public void removeFromGroup(String subject, String group) {
+        this.inner.removeFromGroup(subject, group);
+        return;
+    }
+
+    public #String[] groups(String subject) { return this.inner.groups(subject); }
+
+    public Authenticator authenticator() { return this.auth; }
+
+    public Account account() { return this.acct; }
+
+    public TokenVerifier verifier() { return this.ver; }
+}

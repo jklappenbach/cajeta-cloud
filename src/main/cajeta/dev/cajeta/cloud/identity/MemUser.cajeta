@@ -9,10 +9,28 @@ final class MemUser {
     String subject;
     String username;
     boolean confirmed;
+    /** A tagged record (§4.7), or "" for a passwordless account (§15.18.1). */
     String passwordRecord;
     Attributes attrs;
     ArrayList<String> groups;
     String code;
+
+    // Lockout (§4.4, §15.18.8): wrong passwords and wrong codes count alike.
+    int32 failures;
+    int64 lockedUntil;
+
+    // TOTP (§6.3, §15.18.5): the active secret, one pending enrollment,
+    // and the last step a code was accepted for.
+    int8[] totp;
+    boolean totpActive;
+    int8[] totpPending;
+    int64 totpLastStep;
+
+    // Delivered codes the hooks expose (§6.5, §15.9).
+    String lastOtp;
+    String resetCode;
+    int64 resetExpires;
+    boolean resetRequired;
 
     MemUser(String subject, String username, boolean confirmed,
             #String passwordRecord, #Attributes attrs, #String code) {
@@ -23,6 +41,14 @@ final class MemUser {
         this.attrs #= attrs;
         this.groups = heap ArrayList<String>();
         this.code #= code;
+        this.failures = 0;
+        this.lockedUntil = 0L;
+        this.totpActive = false;
+        this.totpLastStep = -1L;
+        this.lastOtp = "";
+        this.resetCode = "";
+        this.resetExpires = 0L;
+        this.resetRequired = false;
         return;
     }
 

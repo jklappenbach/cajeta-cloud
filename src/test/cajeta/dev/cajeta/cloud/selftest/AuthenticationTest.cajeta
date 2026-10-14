@@ -1,0 +1,943 @@
+package dev.cajeta.cloud.selftest;
+
+import cajeta.codec.Base32;
+import cajeta.collection.ArrayList;
+import cajeta.hash.Totp;
+import cajeta.lang.String;
+import dev.cajeta.unit.Assert;
+import dev.cajeta.cloud.Capabilities;
+import dev.cajeta.cloud.identity.Account;
+import dev.cajeta.cloud.identity.Attributes;
+import dev.cajeta.cloud.identity.Authenticator;
+import dev.cajeta.cloud.identity.Challenge;
+import dev.cajeta.cloud.identity.ChallengeAnswer;
+import dev.cajeta.cloud.identity.ChallengeKind;
+import dev.cajeta.cloud.identity.Claims;
+import dev.cajeta.cloud.identity.Factor;
+import dev.cajeta.cloud.identity.IdentityCapability;
+import dev.cajeta.cloud.identity.IdentityException;
+import dev.cajeta.cloud.identity.Jwks;
+import dev.cajeta.cloud.identity.Jwt;
+import dev.cajeta.cloud.identity.ManualTimeSource;
+import dev.cajeta.cloud.identity.MemoryUserPool;
+import dev.cajeta.cloud.identity.RegistrationResult;
+import dev.cajeta.cloud.identity.SignInResult;
+import dev.cajeta.cloud.identity.TokenUse;
+import dev.cajeta.cloud.identity.TokenVerifier;
+import dev.cajeta.cloud.identity.Tokens;
+import dev.cajeta.cloud.identity.TotpEnrollment;
+import dev.cajeta.cloud.identity.User;
+
+/**
+ * cajeta-cloud-identity Unit 3 (plan 3.1.1 to 3.1.16 but 3.1.13, which is
+ * the stdlib's): sign-in, lockout, refresh and sign-out, claims and their
+ * verification, independent HS256 verification over the JWKS, PBKDF2
+ * records, TOTP, SMS and email codes, redaction, capabilities,
+ * passwordless access, code lockout, hidden user existence and the
+ * self-service plane. Every case runs the memory driver on a manual
+ * clock, so expiry and TOTP steps move only when the test says.
+ */
+public class AuthenticationTest {
+
+    public AuthenticationTest() { return; }
+
+    static int64 START() { return 1700000000L; }
+
+    static #String pw() {
+        String p = "Xq7#correct-horse";
+        return #p;
+    }
+
+    /** Register and confirm through the hook; the subject. */
+    static #String enrolled(MemoryUserPool p, String name) {
+        RegistrationResult r #= p.register(name, AuthenticationTest.pw());
+        String sub #= r.subject();
+        String code #= p.hooks().lastConfirmationCode(sub);
+        p.confirm(name, code);
+        return #sub;
+    }
+
+    static #String enrolledWith(MemoryUserPool p, String name,
+                                Attributes attrs) {
+        RegistrationResult r #= p.registerWith(name, AuthenticationTest.pw(),
+            attrs);
+        String sub #= r.subject();
+        String code #= p.hooks().lastConfirmationCode(sub);
+        p.confirm(name, code);
+        return #sub;
+    }
+
+    /** The kind a password sign-in fails with, or -1 when it succeeds. */
+    static int32 signInKind(Authenticator a, String name, String password) {
+        try {
+            SignInResult r #= a.signIn(name, password);
+        } catch (IdentityException e) {
+            return e.kind();
+        }
+        return -1;
+    }
+
+    static #String signInMessage(Authenticator a, String name,
+                                 String password) {
+        String m = "";
+        try {
+            SignInResult r #= a.signIn(name, password);
+        } catch (IdentityException e) {
+            m #= "" + e.message;
+        }
+        return #m;
+    }
+
+    static int64 signInRetryAfter(Authenticator a, String name,
+                                  String password) {
+        try {
+            SignInResult r #= a.signIn(name, password);
+        } catch (IdentityException e) {
+            return e.retryAfter();
+        }
+        return -2L;
+    }
+
+    static int32 respondKind(Authenticator a, String session, int32 kind,
+                             String code) {
+        try {
+            SignInResult r #= a.respond(session, kind,
+                ChallengeAnswer.code(code));
+        } catch (IdentityException e) {
+            return e.kind();
+        }
+        return -1;
+    }
+
+    static int32 refreshKind(Authenticator a, String token) {
+        try {
+            Tokens t #= a.refresh(token);
+        } catch (IdentityException e) {
+            return e.kind();
+        }
+        return -1;
+    }
+
+    /** True when verification fails with invalid-token naming `check`. */
+    static boolean failsCheck(TokenVerifier v, String token, int32 use,
+                              String check) {
+        try {
+            Claims c #= v.verify(token, use);
+        } catch (IdentityException e) {
+            return e.kind() == IdentityException.INVALID_TOKEN()
+                && e.message.contains(check);
+        }
+        return false;
+    }
+
+    /** The detail after the subject: what is left once the username is out. */
+    static #String detail(String message) {
+        int64 at = message.indexOf("': ");
+        if (at < 0L) { return "" + message; }
+        return message.substring((int32) at, message.byteLength());
+    }
+
+    /** The six-digit TOTP code at `now` for a Base32 secret. */
+    static #String totpAt(String secret, int64 now) {
+        int8[] key #= Base32.decode(secret);
+        int32 c = Totp.code(key, (int64) key.count(), now, 30, 6);
+        return Totp.format(c, 6);
+    }
+
+    /** A six-digit code that is not `code`. */
+    static #String other(String code) {
+        if (code.equals("000000")) {
+            String s = "111111";
+            return #s;
+        }
+        String s = "000000";
+        return #s;
+    }
+
+    static #Attributes contact(String email, String phone) {
+        Attributes a = heap Attributes();
+        a.set("email", email);
+        a.set("phone_number", phone);
+        return #a;
+    }
+
+    // --- 3.1.1 --------------------------------------------------------
+
+    @Test
+    public void rightPasswordReturnsTokensAndWrongOnesAreAlike() {
+        ManualTimeSource clock = heap ManualTimeSource(AuthenticationTest.START());
+        MemoryUserPool p #= MemoryUserPool.withClock(clock);
+        String sub #= AuthenticationTest.enrolled(p, "alice");
+        Authenticator a = p.authenticator();
+        SignInResult r #= a.signIn("alice", AuthenticationTest.pw());
+        Assert.isTrue(r.isTokens());
+        Tokens t = r.tokens();
+        Assert.isTrue(t.accessToken().byteLength() > 0);
+        Assert.isTrue(t.idToken().byteLength() > 0);
+        Assert.isTrue(t.hasRefreshToken());
+        Assert.isTrue(t.accessExpiresAt() > AuthenticationTest.START());
+        Assert.isTrue(t.refreshExpiresAt() > t.accessExpiresAt());
+
+        Assert.isTrue(AuthenticationTest.signInKind(a, "alice", "Xq7#wrong-horse")
+            == IdentityException.INVALID_CREDENTIALS());
+        Assert.isTrue(AuthenticationTest.signInKind(a, "mallory", "Xq7#wrong-horse")
+            == IdentityException.INVALID_CREDENTIALS());
+        String wrong #= AuthenticationTest.signInMessage(a, "alice",
+            "Xq7#wrong-horse");
+        String unknown #= AuthenticationTest.signInMessage(a, "mallory",
+            "Xq7#wrong-horse");
+        String d1 #= AuthenticationTest.detail(wrong);
+        String d2 #= AuthenticationTest.detail(unknown);
+        Assert.isTrue(d1.byteLength() > 0);
+        Assert.isTrue(d1.equals(d2));
+    }
+
+    // --- 3.1.2 --------------------------------------------------------
+
+    @Test
+    public void unconfirmedUserIsNotConfirmed() {
+        ManualTimeSource clock = heap ManualTimeSource(AuthenticationTest.START());
+        MemoryUserPool p #= MemoryUserPool.withClock(clock);
+        RegistrationResult r #= p.register("bob", AuthenticationTest.pw());
+        Assert.isTrue(AuthenticationTest.signInKind(p.authenticator(), "bob",
+            AuthenticationTest.pw()) == IdentityException.NOT_CONFIRMED());
+    }
+
+    // --- 3.1.3 --------------------------------------------------------
+
+    @Test
+    public void wrongPasswordsPastTheLimitLock() {
+        ManualTimeSource clock = heap ManualTimeSource(AuthenticationTest.START());
+        MemoryUserPool p #= MemoryUserPool.withClock(clock);
+        String sub #= AuthenticationTest.enrolled(p, "carl");
+        Authenticator a = p.authenticator();
+        int32 i = 0;
+        while (i < 5) {
+            Assert.isTrue(AuthenticationTest.signInKind(a, "carl", "Xq7#wrong-horse")
+                == IdentityException.INVALID_CREDENTIALS());
+            i = i + 1;
+        }
+        Assert.isTrue(AuthenticationTest.signInKind(a, "carl", "Xq7#wrong-horse")
+            == IdentityException.LOCKED());
+        int64 wait = AuthenticationTest.signInRetryAfter(a, "carl",
+            AuthenticationTest.pw());
+        Assert.isTrue(wait > 0L);
+        Assert.isTrue(AuthenticationTest.signInKind(a, "carl",
+            AuthenticationTest.pw()) == IdentityException.LOCKED());
+        clock.advance(wait);
+        Assert.isTrue(AuthenticationTest.signInKind(a, "carl",
+            AuthenticationTest.pw()) == -1);
+    }
+
+    // --- 3.1.4 --------------------------------------------------------
+
+    @Test
+    public void refreshIssuesTokensUntilSignOutRevokesIt() {
+        ManualTimeSource clock = heap ManualTimeSource(AuthenticationTest.START());
+        MemoryUserPool p #= MemoryUserPool.withClock(clock);
+        String sub #= AuthenticationTest.enrolled(p, "dora");
+        Authenticator a = p.authenticator();
+        SignInResult r #= a.signIn("dora", AuthenticationTest.pw());
+        Tokens t = r.tokens();
+        String rt #= t.refreshToken();
+        String first #= t.accessToken();
+        clock.advance(60L);
+        Tokens t2 #= a.refresh(rt);
+        String second #= t2.accessToken();
+        Assert.isFalse(second.equals(first));
+        Assert.isFalse(t2.hasRefreshToken());
+        Claims c #= p.verifier().verify(second, TokenUse.ACCESS());
+        Assert.isTrue(c.subject().equals(sub));
+        Tokens t3 #= a.refresh(rt);
+        a.signOut(rt);
+        Assert.isTrue(AuthenticationTest.refreshKind(a, rt)
+            == IdentityException.INVALID_TOKEN());
+        Assert.isTrue(AuthenticationTest.refreshKind(a, "not-a-refresh-token")
+            == IdentityException.INVALID_TOKEN());
+    }
+
+    // --- 3.1.5 --------------------------------------------------------
+
+    @Test
+    public void claimsCarryTheUserAndEachCheckIsNamed() {
+        ManualTimeSource clock = heap ManualTimeSource(AuthenticationTest.START());
+        MemoryUserPool p #= MemoryUserPool.withClock(clock);
+        Attributes at #= AuthenticationTest.contact("dana@example.com",
+            "+15555550100");
+        String sub #= AuthenticationTest.enrolledWith(p, "dana", at);
+        p.addToGroup(sub, "admins");
+        SignInResult r #= p.authenticator().signIn("dana",
+            AuthenticationTest.pw());
+        Tokens t = r.tokens();
+        String access #= t.accessToken();
+        String idt #= t.idToken();
+        TokenVerifier v = p.verifier();
+
+        Claims c #= v.verify(access, TokenUse.ACCESS());
+        Assert.isTrue(c.subject().equals(sub));
+        Assert.isTrue(c.username().equals("dana"));
+        Assert.isTrue(c.inGroup("admins"));
+        Assert.isTrue(c.tokenUse() == TokenUse.ACCESS());
+        Assert.isTrue(c.expiresAt() == t.accessExpiresAt());
+        Assert.isTrue(c.issuedAt() == AuthenticationTest.START());
+        Assert.isTrue(c.issuer().byteLength() > 0);
+        Assert.isTrue(c.audience().byteLength() > 0);
+
+        Claims ic #= v.verify(idt, TokenUse.ID());
+        Assert.isTrue(ic.tokenUse() == TokenUse.ID());
+        Assert.isTrue(ic.subject().equals(sub));
+        Assert.isTrue(ic.username().equals("dana"));
+        Assert.isTrue(ic.inGroup("admins"));
+        Assert.isTrue(ic.issuer().equals(c.issuer()));
+        Assert.isTrue(ic.audience().equals(c.audience()));
+        Attributes ia #= ic.attributes();
+        Assert.isTrue(ia.get("email").equals("dana@example.com"));
+
+        // A changed signature byte.
+        int32 sigAt = TestJwt.dot(access, TestJwt.dot(access, 0) + 1) + 1;
+        String repl = "A";
+        if (access.byteAt(sigAt) == (int8) 65) { repl = "B"; }
+        String head #= access.substring(0, sigAt);
+        String tail #= access.substring(sigAt + 1, access.byteLength());
+        String tampered #= head + repl + tail;
+        Assert.isTrue(AuthenticationTest.failsCheck(v, tampered,
+            TokenUse.ACCESS(), "signature"));
+
+        // Validly signed, with the wrong issuer, then the wrong audience.
+        Jwks keys #= v.jwks();
+        String doc #= keys.json();
+        int8[] key #= TestJwt.jwksKey(doc);
+        int64 keyLen = (int64) key.count();
+        String badIss #= TestJwt.forge(access, "\"iss\":\"", "\"iss\":\"evil-",
+            key, keyLen);
+        Assert.isTrue(AuthenticationTest.failsCheck(v, badIss,
+            TokenUse.ACCESS(), "issuer"));
+        String badAud #= TestJwt.forge(access, "\"client_id\":\"",
+            "\"client_id\":\"evil-", key, keyLen);
+        Assert.isTrue(AuthenticationTest.failsCheck(v, badAud,
+            TokenUse.ACCESS(), "audience"));
+        Assert.isTrue(AuthenticationTest.failsCheck(v, access,
+            TokenUse.ID(), "use"));
+        Assert.isTrue(AuthenticationTest.failsCheck(v, "a.b",
+            TokenUse.ACCESS(), "malformed"));
+
+        clock.advance(3601L);
+        Assert.isTrue(AuthenticationTest.failsCheck(v, access,
+            TokenUse.ACCESS(), "expiry"));
+    }
+
+    // --- 3.1.6 --------------------------------------------------------
+
+    @Test
+    public void tokensVerifyIndependentlyOverTheJwks() {
+        ManualTimeSource clock = heap ManualTimeSource(AuthenticationTest.START());
+        MemoryUserPool p #= MemoryUserPool.withClock(clock);
+        String sub #= AuthenticationTest.enrolled(p, "eve");
+        SignInResult r #= p.authenticator().signIn("eve",
+            AuthenticationTest.pw());
+        Tokens t = r.tokens();
+        String access #= t.accessToken();
+        String idt #= t.idToken();
+        Jwks keys #= p.verifier().jwks();
+        String doc #= keys.json();
+        Assert.isTrue(TestJwt.jwksMember(doc, "kty").equals("oct"));
+        Assert.isTrue(TestJwt.jwksMember(doc, "alg").equals("HS256"));
+        String kid #= TestJwt.jwksMember(doc, "kid");
+        Assert.isTrue(kid.byteLength() > 0);
+        int8[] key #= TestJwt.jwksKey(doc);
+        int64 keyLen = (int64) key.count();
+        Assert.isTrue(keyLen >= 32L);
+        Assert.isTrue(TestJwt.verify(access, key, keyLen));
+        Assert.isTrue(TestJwt.verify(idt, key, keyLen));
+        String header #= TestJwt.header(access);
+        Assert.isTrue(header.contains("\"alg\":\"HS256\""));
+        Assert.isTrue(header.contains("\"kid\":\"" + kid + "\""));
+        String payload #= TestJwt.payload(access);
+        Assert.isTrue(payload.contains("\"sub\":\"" + sub + "\""));
+        String forged #= TestJwt.forge(access, "\"username\":\"eve\"",
+            "\"username\":\"root\"", key, keyLen);
+        Assert.isTrue(TestJwt.verify(forged, key, keyLen));
+        String spliced #= TestJwt.segment(forged, 0) + "."
+            + TestJwt.segment(forged, 1) + "." + TestJwt.segment(access, 2);
+        Assert.isFalse(TestJwt.verify(spliced, key, keyLen));
+    }
+
+    // --- 3.1.7 --------------------------------------------------------
+
+    @Test
+    public void passwordsArePbkdf2AndLegacyRecordsStillSignIn() {
+        ManualTimeSource clock = heap ManualTimeSource(AuthenticationTest.START());
+        MemoryUserPool p #= MemoryUserPool.withClock(clock);
+        String sub #= AuthenticationTest.enrolled(p, "fay");
+        String rec #= p.hooks().passwordRecord(sub);
+        Assert.isTrue(rec.startsWith("pbkdf2-sha256$"));
+        Assert.isFalse(rec.contains(AuthenticationTest.pw()));
+
+        p.hooks().useLegacyPassword(sub, AuthenticationTest.pw());
+        String legacy #= p.hooks().passwordRecord(sub);
+        Assert.isTrue(legacy.startsWith("sha256-salted$"));
+        Authenticator a = p.authenticator();
+        Assert.isTrue(AuthenticationTest.signInKind(a, "fay", "Xq7#wrong-horse")
+            == IdentityException.INVALID_CREDENTIALS());
+        Assert.isTrue(AuthenticationTest.signInKind(a, "fay",
+            AuthenticationTest.pw()) == -1);
+        String upgraded #= p.hooks().passwordRecord(sub);
+        Assert.isTrue(upgraded.startsWith("pbkdf2-sha256$"));
+        Assert.isTrue(AuthenticationTest.signInKind(a, "fay",
+            AuthenticationTest.pw()) == -1);
+    }
+
+    // --- 3.1.8 --------------------------------------------------------
+
+    @Test
+    public void totpEnrollsOnAFirstCodeAndThenChallenges() {
+        ManualTimeSource clock = heap ManualTimeSource(AuthenticationTest.START());
+        MemoryUserPool p #= MemoryUserPool.withClock(clock);
+        String sub #= AuthenticationTest.enrolled(p, "gus");
+        Authenticator a = p.authenticator();
+        Account acc = p.account();
+        SignInResult r #= a.signIn("gus", AuthenticationTest.pw());
+        String access #= r.tokens().accessToken();
+
+        TotpEnrollment en #= acc.enrollTotp(access);
+        String secret #= en.secret();
+        Assert.isTrue(secret.byteLength() == 32);
+        String uri #= en.uri();
+        Assert.isTrue(uri.startsWith("otpauth://totp/"));
+        Assert.isTrue(uri.contains("secret=" + secret));
+        Assert.isTrue(en.session().byteLength() == 0);
+
+        // Not active before the first code: sign-in still answers tokens.
+        SignInResult before #= a.signIn("gus", AuthenticationTest.pw());
+        Assert.isTrue(before.isTokens());
+
+        String now #= AuthenticationTest.totpAt(secret, clock.nowSeconds());
+        String wrong #= AuthenticationTest.other(now);
+        int32 wrongKind = -1;
+        try {
+            acc.activateTotp(access, wrong);
+        } catch (IdentityException e) {
+            wrongKind = e.kind();
+        }
+        Assert.isTrue(wrongKind == IdentityException.INVALID_CODE());
+        acc.activateTotp(access, now);
+
+        clock.advance(30L);
+        SignInResult r2 #= a.signIn("gus", AuthenticationTest.pw());
+        Assert.isTrue(r2.isChallenge());
+        Challenge ch = r2.challenge();
+        Assert.isTrue(ch.kind() == ChallengeKind.TOTP());
+        String session #= ch.session();
+        String later #= AuthenticationTest.totpAt(secret, clock.nowSeconds());
+        SignInResult r3 #= a.respond(session, ChallengeKind.TOTP(),
+            ChallengeAnswer.code(later));
+        Assert.isTrue(r3.isTokens());
+    }
+
+    @Test
+    public void mfaSetupEnrollsInsideTheChallenge() {
+        ManualTimeSource clock = heap ManualTimeSource(AuthenticationTest.START());
+        MemoryUserPool p #= MemoryUserPool.withClock(clock);
+        p.requireTotp(true);
+        String sub #= AuthenticationTest.enrolled(p, "hal");
+        Authenticator a = p.authenticator();
+        SignInResult r #= a.signIn("hal", AuthenticationTest.pw());
+        Assert.isTrue(r.isChallenge());
+        Assert.isTrue(r.challenge().kind() == ChallengeKind.MFA_SETUP());
+        String session #= r.challenge().session();
+        TotpEnrollment en #= a.enrollTotpForChallenge(session);
+        String secret #= en.secret();
+        String answer #= en.session();
+        Assert.isTrue(answer.byteLength() > 0);
+        String code #= AuthenticationTest.totpAt(secret, clock.nowSeconds());
+        SignInResult done #= a.respond(answer, ChallengeKind.MFA_SETUP(),
+            ChallengeAnswer.code(code));
+        Assert.isTrue(done.isTokens());
+        clock.advance(30L);
+        SignInResult next #= a.signIn("hal", AuthenticationTest.pw());
+        Assert.isTrue(next.isChallenge());
+        Assert.isTrue(next.challenge().kind() == ChallengeKind.TOTP());
+    }
+
+    // --- 3.1.9 --------------------------------------------------------
+
+    @Test
+    public void emailAndSmsCodesCompleteExpireAndMismatch() {
+        ManualTimeSource clock = heap ManualTimeSource(AuthenticationTest.START());
+        MemoryUserPool p #= MemoryUserPool.withClock(clock);
+        Attributes at #= AuthenticationTest.contact("ivy@example.com",
+            "+15555550123");
+        String sub #= AuthenticationTest.enrolledWith(p, "ivy", at);
+        Authenticator a = p.authenticator();
+
+        SignInResult r #= a.signInWith("ivy", Factor.EMAIL_OTP());
+        Assert.isTrue(r.isChallenge());
+        Assert.isTrue(r.challenge().kind() == ChallengeKind.EMAIL_OTP());
+        String dest #= r.challenge().parameter("destination");
+        Assert.isTrue(dest.byteLength() > 0);
+        Assert.isFalse(dest.contains("ivy@example.com"));
+        String s1 #= r.challenge().session();
+        String code #= p.hooks().lastSignInCode(sub);
+        Assert.isTrue(code.byteLength() == 6);
+        SignInResult ok #= a.respond(s1, ChallengeKind.EMAIL_OTP(),
+            ChallengeAnswer.code(code));
+        Assert.isTrue(ok.isTokens());
+
+        SignInResult r2 #= a.signInWith("ivy", Factor.EMAIL_OTP());
+        String s2 #= r2.challenge().session();
+        String code2 #= p.hooks().lastSignInCode(sub);
+        String wrong #= AuthenticationTest.other(code2);
+        Assert.isTrue(AuthenticationTest.respondKind(a, s2,
+            ChallengeKind.EMAIL_OTP(), wrong) == IdentityException.INVALID_CODE());
+
+        SignInResult r3 #= a.signInWith("ivy", Factor.EMAIL_OTP());
+        String s3 #= r3.challenge().session();
+        String code3 #= p.hooks().lastSignInCode(sub);
+        clock.advance(181L);
+        Assert.isTrue(AuthenticationTest.respondKind(a, s3,
+            ChallengeKind.EMAIL_OTP(), code3) == IdentityException.CODE_EXPIRED());
+
+        SignInResult r4 #= a.signInWith("ivy", Factor.SMS_OTP());
+        Assert.isTrue(r4.challenge().kind() == ChallengeKind.SMS_OTP());
+        String phone #= r4.challenge().parameter("destination");
+        Assert.isTrue(phone.endsWith("0123"));
+        Assert.isFalse(phone.contains("5555550123"));
+        String s4 #= r4.challenge().session();
+        String code4 #= p.hooks().lastSignInCode(sub);
+        SignInResult sms #= a.respond(s4, ChallengeKind.SMS_OTP(),
+            ChallengeAnswer.code(code4));
+        Assert.isTrue(sms.isTokens());
+    }
+
+    // --- 3.1.10 -------------------------------------------------------
+
+    static void keep(ArrayList<String> out, IdentityException e) {
+        String m = "" + e.message;
+        out.add(#m);
+        return;
+    }
+
+    static boolean anyContains(ArrayList<String> haystacks, String needle) {
+        int32 i = 0;
+        while (i < haystacks.count()) {
+            if (haystacks.get(i).contains(needle)) { return true; }
+            i = i + 1;
+        }
+        return false;
+    }
+
+    @Test
+    public void noMessageCarriesASecret() {
+        ManualTimeSource clock = heap ManualTimeSource(AuthenticationTest.START());
+        MemoryUserPool p #= MemoryUserPool.withClock(clock);
+        Attributes at #= AuthenticationTest.contact("jo@example.com",
+            "+15555550188");
+        String sub #= AuthenticationTest.enrolledWith(p, "jo", at);
+        Authenticator a = p.authenticator();
+        Account acc = p.account();
+        ArrayList<String> said = heap ArrayList<String>();
+        ArrayList<String> secrets = heap ArrayList<String>();
+        secrets.add(AuthenticationTest.pw());
+        secrets.add("Xq7#wrong-horse");
+        secrets.add("Zz9!");
+
+        try { RegistrationResult x #= p.register("jo2", "Zz9!"); }
+        catch (IdentityException e) { AuthenticationTest.keep(said, e); }
+        try { SignInResult x #= a.signIn("jo", "Xq7#wrong-horse"); }
+        catch (IdentityException e) { AuthenticationTest.keep(said, e); }
+        try { SignInResult x #= a.signIn("nobody", "Xq7#wrong-horse"); }
+        catch (IdentityException e) { AuthenticationTest.keep(said, e); }
+
+        SignInResult r #= a.signIn("jo", AuthenticationTest.pw());
+        Tokens t = r.tokens();
+        String access #= t.accessToken();
+        String idt #= t.idToken();
+        String rt #= t.refreshToken();
+        secrets.add("" + access);
+        secrets.add("" + idt);
+        secrets.add("" + rt);
+        String red #= t.redacted();
+        said.add("" + red);
+        String jr #= Jwt.redact(access);
+        Assert.isTrue(jr.contains(sub));
+        said.add(#jr);
+
+        SignInResult c #= a.signInWith("jo", Factor.EMAIL_OTP());
+        String code #= p.hooks().lastSignInCode(sub);
+        String wrong #= AuthenticationTest.other(code);
+        secrets.add("" + code);
+        secrets.add("" + wrong);
+        String sess #= c.challenge().session();
+        try { SignInResult x #= a.respond(sess, ChallengeKind.EMAIL_OTP(), ChallengeAnswer.code(wrong)); }
+        catch (IdentityException e) { AuthenticationTest.keep(said, e); }
+        said.add(c.challenge().parameter("destination"));
+
+        TotpEnrollment en #= acc.enrollTotp(access);
+        String secret #= en.secret();
+        secrets.add("" + secret);
+        String tcode #= AuthenticationTest.totpAt(secret, clock.nowSeconds());
+        String twrong #= AuthenticationTest.other(tcode);
+        secrets.add("" + twrong);
+        try { acc.activateTotp(access, twrong); }
+        catch (IdentityException e) { AuthenticationTest.keep(said, e); }
+
+        a.forgotPassword("jo");
+        String reset #= p.hooks().lastPasswordResetCode(sub);
+        String rwrong #= AuthenticationTest.other(reset);
+        secrets.add("" + reset);
+        secrets.add("" + rwrong);
+        try { a.confirmForgotPassword("jo", rwrong, "Xq7#next-horse"); }
+        catch (IdentityException e) { AuthenticationTest.keep(said, e); }
+        secrets.add("Xq7#next-horse");
+
+        try { Claims x #= p.verifier().verify(access + "x", TokenUse.ACCESS()); }
+        catch (IdentityException e) { AuthenticationTest.keep(said, e); }
+        a.signOut(rt);
+        try { Tokens x #= a.refresh(rt); }
+        catch (IdentityException e) { AuthenticationTest.keep(said, e); }
+        try { User x #= acc.me(access + "x"); }
+        catch (IdentityException e) { AuthenticationTest.keep(said, e); }
+
+        Assert.isTrue(said.count() >= 11);
+        int32 i = 0;
+        while (i < secrets.count()) {
+            Assert.isFalse(AuthenticationTest.anyContains(said, secrets.get(i)));
+            i = i + 1;
+        }
+    }
+
+    // --- 3.1.11 -------------------------------------------------------
+
+    @Test
+    public void memoryDriverDeclaresAllButPasskeysAndIntrospection() {
+        MemoryUserPool p = heap MemoryUserPool();
+        Capabilities c = p.capabilities();
+        Assert.isTrue(c.supports(IdentityCapability.CONFIRMATION()));
+        Assert.isTrue(c.supports(IdentityCapability.TOTP()));
+        Assert.isTrue(c.supports(IdentityCapability.SMS_OTP()));
+        Assert.isTrue(c.supports(IdentityCapability.EMAIL_OTP()));
+        Assert.isTrue(c.supports(IdentityCapability.REFRESH()));
+        Assert.isTrue(c.supports(IdentityCapability.REVOCATION()));
+        Assert.isTrue(c.supports(IdentityCapability.CUSTOM_ATTRIBUTES()));
+        Assert.isTrue(c.supports(IdentityCapability.GROUPS()));
+        Assert.isTrue(c.supports(IdentityCapability.JWKS()));
+        Assert.isTrue(c.supports(IdentityCapability.ADMIN()));
+        Assert.isTrue(c.supports(IdentityCapability.PASSWORD_RESET()));
+        Assert.isTrue(c.supports(IdentityCapability.PASSWORDLESS()));
+        Assert.isTrue(c.supports(IdentityCapability.TOTP_SIGN_IN()));
+        Assert.isFalse(c.supports(IdentityCapability.PASSKEYS()));
+        Assert.isFalse(c.supports(IdentityCapability.INTROSPECTION()));
+        Assert.isTrue(c.caveatFor(IdentityCapability.TOTP()).contains("memory"));
+    }
+
+    // --- 3.1.12 -------------------------------------------------------
+
+    @Test
+    public void passwordlessSignsInWithCodesAndTheAuthenticatorAlone() {
+        ManualTimeSource clock = heap ManualTimeSource(AuthenticationTest.START());
+        MemoryUserPool p #= MemoryUserPool.withClock(clock);
+        Attributes at #= AuthenticationTest.contact("kai@example.com",
+            "+15555550142");
+        RegistrationResult rr #= p.registerPasswordless("kai", at);
+        String sub #= rr.subject();
+        String cc #= p.hooks().lastConfirmationCode(sub);
+        p.confirm("kai", cc);
+        Authenticator a = p.authenticator();
+        Assert.isTrue(AuthenticationTest.signInKind(a, "kai",
+            AuthenticationTest.pw()) == IdentityException.INVALID_CREDENTIALS());
+        Assert.isTrue(AuthenticationTest.signInKind(a, "kai", "")
+            == IdentityException.INVALID_CREDENTIALS());
+
+        SignInResult r #= a.signInWith("kai", Factor.EMAIL_OTP());
+        String s1 #= r.challenge().session();
+        String code #= p.hooks().lastSignInCode(sub);
+        SignInResult ok #= a.respond(s1, ChallengeKind.EMAIL_OTP(),
+            ChallengeAnswer.code(code));
+        Assert.isTrue(ok.isTokens());
+        String access #= ok.tokens().accessToken();
+
+        TotpEnrollment en #= p.account().enrollTotp(access);
+        String secret #= en.secret();
+        int8[] raw #= Base32.decode(secret);
+        Assert.isTrue(raw.count() == 20L);
+        String uri #= en.uri();
+        Assert.isTrue(uri.startsWith("otpauth://totp/"));
+        Assert.isTrue(uri.contains("kai"));
+        String first #= AuthenticationTest.totpAt(secret, clock.nowSeconds());
+        p.account().activateTotp(access, first);
+
+        clock.advance(30L);
+        SignInResult t #= a.signInWith("kai", Factor.TOTP());
+        Assert.isTrue(t.isChallenge());
+        Assert.isTrue(t.challenge().kind() == ChallengeKind.TOTP());
+        String s2 #= t.challenge().session();
+        String now #= AuthenticationTest.totpAt(secret, clock.nowSeconds());
+        SignInResult done #= a.respond(s2, ChallengeKind.TOTP(),
+            ChallengeAnswer.code(now));
+        Assert.isTrue(done.isTokens());
+
+        SignInResult again #= a.signInWith("kai", Factor.TOTP());
+        String s3 #= again.challenge().session();
+        Assert.isTrue(AuthenticationTest.respondKind(a, s3, ChallengeKind.TOTP(),
+            now) == IdentityException.INVALID_CODE());
+    }
+
+    @Test
+    public void passkeyFactorIsUnsupported() {
+        ManualTimeSource clock = heap ManualTimeSource(AuthenticationTest.START());
+        MemoryUserPool p #= MemoryUserPool.withClock(clock);
+        String sub #= AuthenticationTest.enrolled(p, "lou");
+        int32 kind = -1;
+        try {
+            SignInResult r #= p.authenticator().signInWith("lou",
+                Factor.PASSKEY());
+        } catch (IdentityException e) {
+            kind = e.kind();
+        }
+        Assert.isTrue(kind == IdentityException.UNSUPPORTED_CAPABILITY());
+    }
+
+    // --- 3.1.14 -------------------------------------------------------
+
+    @Test
+    public void fiveWrongCodesLockWithBackoff() {
+        ManualTimeSource clock = heap ManualTimeSource(AuthenticationTest.START());
+        MemoryUserPool p #= MemoryUserPool.withClock(clock);
+        Attributes at #= AuthenticationTest.contact("max@example.com",
+            "+15555550177");
+        String sub #= AuthenticationTest.enrolledWith(p, "max", at);
+        Authenticator a = p.authenticator();
+        SignInResult r #= a.signInWith("max", Factor.EMAIL_OTP());
+        String s #= r.challenge().session();
+        String code #= p.hooks().lastSignInCode(sub);
+        String wrong #= AuthenticationTest.other(code);
+        int32 i = 0;
+        while (i < 5) {
+            Assert.isTrue(AuthenticationTest.respondKind(a, s,
+                ChallengeKind.EMAIL_OTP(), wrong)
+                == IdentityException.INVALID_CODE());
+            i = i + 1;
+        }
+        int64 wait = -1L;
+        int32 kind = -1;
+        try {
+            SignInResult x #= a.respond(s, ChallengeKind.EMAIL_OTP(),
+                ChallengeAnswer.code(code));
+        } catch (IdentityException e) {
+            kind = e.kind();
+            wait = e.retryAfter();
+        }
+        Assert.isTrue(kind == IdentityException.LOCKED());
+        Assert.isTrue(wait > 0L);
+        clock.advance(wait - 1L);
+        Assert.isTrue(AuthenticationTest.respondKind(a, s,
+            ChallengeKind.EMAIL_OTP(), code) == IdentityException.LOCKED());
+        clock.advance(1L);
+        SignInResult ok #= a.respond(s, ChallengeKind.EMAIL_OTP(),
+            ChallengeAnswer.code(code));
+        Assert.isTrue(ok.isTokens());
+
+        // TOTP codes count against the same lock.
+        String access #= ok.tokens().accessToken();
+        TotpEnrollment en #= p.account().enrollTotp(access);
+        String secret #= en.secret();
+        String first #= AuthenticationTest.totpAt(secret, clock.nowSeconds());
+        p.account().activateTotp(access, first);
+        clock.advance(30L);
+        String right #= AuthenticationTest.totpAt(secret, clock.nowSeconds());
+        String bad #= AuthenticationTest.other(right);
+        // Six sessions open before the lock, so the sixth answer meets it.
+        ArrayList<String> sessions = heap ArrayList<String>();
+        i = 0;
+        while (i < 6) {
+            SignInResult t #= a.signInWith("max", Factor.TOTP());
+            String ts #= t.challenge().session();
+            sessions.add(#ts);
+            i = i + 1;
+        }
+        i = 0;
+        while (i < 5) {
+            Assert.isTrue(AuthenticationTest.respondKind(a, sessions.get(i),
+                ChallengeKind.TOTP(), bad) == IdentityException.INVALID_CODE());
+            i = i + 1;
+        }
+        Assert.isTrue(AuthenticationTest.respondKind(a, sessions.get(5),
+            ChallengeKind.TOTP(), right) == IdentityException.LOCKED());
+        int32 locked = -1;
+        try {
+            SignInResult t7 #= a.signInWith("max", Factor.TOTP());
+        } catch (IdentityException e) {
+            locked = e.kind();
+        }
+        Assert.isTrue(locked == IdentityException.LOCKED());
+    }
+
+    // --- 3.1.15 -------------------------------------------------------
+
+    @Test
+    public void unknownUserAndWrongPasswordAnswerAlike() {
+        ManualTimeSource clock = heap ManualTimeSource(AuthenticationTest.START());
+        MemoryUserPool p #= MemoryUserPool.withClock(clock);
+        String sub #= AuthenticationTest.enrolled(p, "ned");
+        Authenticator a = p.authenticator();
+        int32 k1 = AuthenticationTest.signInKind(a, "ned", "Xq7#wrong-horse");
+        String m1 #= AuthenticationTest.signInMessage(a, "ned",
+            "Xq7#wrong-horse");
+        Assert.isTrue(p.delete(sub));
+        int32 k2 = AuthenticationTest.signInKind(a, "ned", "Xq7#wrong-horse");
+        String m2 #= AuthenticationTest.signInMessage(a, "ned",
+            "Xq7#wrong-horse");
+        Assert.isTrue(k1 == IdentityException.INVALID_CREDENTIALS());
+        Assert.isTrue(k2 == k1);
+        Assert.isTrue(m1.byteLength() > 0);
+        Assert.isTrue(m2.equals(m1));
+    }
+
+    // --- 3.1.16 -------------------------------------------------------
+
+    /** The kind call `which` of the Account plane fails with, or -1. */
+    static int32 accountKind(Account acc, int32 which, String token) {
+        try {
+            if (which == 0) { User u #= acc.me(token); }
+            if (which == 1) {
+                Attributes x = heap Attributes();
+                x.set("nick", "z");
+                acc.updateAttributes(token, x);
+            }
+            if (which == 2) {
+                acc.changePassword(token, AuthenticationTest.pw(),
+                    "Xq7#other-horse");
+            }
+            if (which == 3) { TotpEnrollment e #= acc.enrollTotp(token); }
+            if (which == 4) { acc.activateTotp(token, "123456"); }
+            if (which == 5) { acc.signOutEverywhere(token); }
+            if (which == 6) { acc.deleteMe(token); }
+        } catch (IdentityException e) {
+            return e.kind();
+        }
+        return -1;
+    }
+
+    static boolean everyCallRefuses(Account acc, String token) {
+        int32 which = 0;
+        while (which < 7) {
+            if (AuthenticationTest.accountKind(acc, which, token)
+                    != IdentityException.INVALID_TOKEN()) {
+                return false;
+            }
+            which = which + 1;
+        }
+        return true;
+    }
+
+    @Test
+    public void accountServesTheCallerUntilItsTokenDies() {
+        ManualTimeSource clock = heap ManualTimeSource(AuthenticationTest.START());
+        MemoryUserPool p #= MemoryUserPool.withClock(clock);
+        String sub #= AuthenticationTest.enrolled(p, "olga");
+        Authenticator a = p.authenticator();
+        Account acc = p.account();
+        SignInResult r #= a.signIn("olga", AuthenticationTest.pw());
+        String access #= r.tokens().accessToken();
+        String rt #= r.tokens().refreshToken();
+
+        User me #= acc.me(access);
+        Assert.isTrue(me.subject().equals(sub));
+        Assert.isTrue(me.username().equals("olga"));
+        Attributes upd = heap Attributes();
+        upd.set("nick", "o");
+        acc.updateAttributes(access, upd);
+        User me2 #= acc.me(access);
+        Assert.isTrue(me2.attributes().get("nick").equals("o"));
+
+        int32 wrongOld = -1;
+        try {
+            acc.changePassword(access, "Xq7#wrong-horse", "Xq7#fresh-horse");
+        } catch (IdentityException e) {
+            wrongOld = e.kind();
+        }
+        Assert.isTrue(wrongOld == IdentityException.INVALID_CREDENTIALS());
+        acc.changePassword(access, AuthenticationTest.pw(), "Xq7#fresh-horse");
+        Assert.isTrue(AuthenticationTest.signInKind(a, "olga",
+            "Xq7#fresh-horse") == -1);
+        Assert.isTrue(AuthenticationTest.signInKind(a, "olga",
+            AuthenticationTest.pw()) == IdentityException.INVALID_CREDENTIALS());
+
+        // A revoked session's access token fails every call.
+        a.signOut(rt);
+        Assert.isTrue(AuthenticationTest.everyCallRefuses(acc, access));
+
+        // So does an expired one.
+        SignInResult r2 #= a.signIn("olga", "Xq7#fresh-horse");
+        String access2 #= r2.tokens().accessToken();
+        User still #= acc.me(access2);
+        clock.advance(3601L);
+        Assert.isTrue(AuthenticationTest.everyCallRefuses(acc, access2));
+
+        // signOutEverywhere ends every session.
+        SignInResult r3 #= a.signIn("olga", "Xq7#fresh-horse");
+        SignInResult r4 #= a.signIn("olga", "Xq7#fresh-horse");
+        String access3 #= r3.tokens().accessToken();
+        String access4 #= r4.tokens().accessToken();
+        String rt4 #= r4.tokens().refreshToken();
+        acc.signOutEverywhere(access3);
+        Assert.isTrue(AuthenticationTest.accountKind(acc, 0, access4)
+            == IdentityException.INVALID_TOKEN());
+        Assert.isTrue(AuthenticationTest.refreshKind(a, rt4)
+            == IdentityException.INVALID_TOKEN());
+
+        // deleteMe removes the account.
+        SignInResult r5 #= a.signIn("olga", "Xq7#fresh-horse");
+        String access5 #= r5.tokens().accessToken();
+        acc.deleteMe(access5);
+        int32 gone = -1;
+        try {
+            User u #= p.lookupByName("olga");
+        } catch (IdentityException e) {
+            gone = e.kind();
+        }
+        Assert.isTrue(gone == IdentityException.USER_NOT_FOUND());
+    }
+
+    // --- §15.9 password reset ----------------------------------------
+
+    @Test
+    public void forgottenPasswordResetsWithTheDeliveredCode() {
+        ManualTimeSource clock = heap ManualTimeSource(AuthenticationTest.START());
+        MemoryUserPool p #= MemoryUserPool.withClock(clock);
+        String sub #= AuthenticationTest.enrolled(p, "pia");
+        Authenticator a = p.authenticator();
+        a.forgotPassword("nobody");
+        a.forgotPassword("pia");
+        String code #= p.hooks().lastPasswordResetCode(sub);
+        Assert.isTrue(code.byteLength() == 6);
+        String wrong #= AuthenticationTest.other(code);
+        int32 k = -1;
+        try {
+            a.confirmForgotPassword("pia", wrong, "Xq7#reset-horse");
+        } catch (IdentityException e) {
+            k = e.kind();
+        }
+        Assert.isTrue(k == IdentityException.INVALID_CODE());
+        a.confirmForgotPassword("pia", code, "Xq7#reset-horse");
+        Assert.isTrue(AuthenticationTest.signInKind(a, "pia",
+            "Xq7#reset-horse") == -1);
+        Assert.isTrue(AuthenticationTest.signInKind(a, "pia",
+            AuthenticationTest.pw()) == IdentityException.INVALID_CREDENTIALS());
+
+        a.forgotPassword("pia");
+        String late #= p.hooks().lastPasswordResetCode(sub);
+        clock.advance(3601L);
+        int32 k2 = -1;
+        try {
+            a.confirmForgotPassword("pia", late, "Xq7#later-horse");
+        } catch (IdentityException e) {
+            k2 = e.kind();
+        }
+        Assert.isTrue(k2 == IdentityException.CODE_EXPIRED());
+
+        p.hooks().requirePasswordReset(sub);
+        Assert.isTrue(AuthenticationTest.signInKind(a, "pia",
+            "Xq7#reset-horse") == IdentityException.PASSWORD_RESET_REQUIRED());
+    }
+}

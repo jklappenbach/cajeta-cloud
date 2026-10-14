@@ -1,0 +1,66 @@
+package dev.cajeta.cloud.identity;
+
+import cajeta.concurrent.LockGuard;
+import cajeta.lang.String;
+
+/**
+ * The memory driver's public plane (identity spec §4, §6, §15.3, §15.9,
+ * §15.18) over the pool's state. Five wrong passwords or codes lock an
+ * account with backoff that doubles from thirty seconds to fifteen
+ * minutes; an unknown username answers exactly as a wrong password does;
+ * codes last three minutes and reset codes an hour.
+ */
+public final class MemoryAuthenticator implements Authenticator {
+
+    MemIdentityState st;
+
+    MemoryAuthenticator(MemIdentityState st) {
+        this.st #= st;
+        return;
+    }
+
+    public #SignInResult signIn(String username, String password) {
+        LockGuard g #= this.st.lock.acquire();
+        return this.st.signIn(username, password);
+    }
+
+    public #SignInResult signInWith(String username, int32 factor) {
+        LockGuard g #= this.st.lock.acquire();
+        return this.st.signInWith(username, factor);
+    }
+
+    public #SignInResult respond(String session, int32 kind,
+                                 ChallengeAnswer answer) {
+        LockGuard g #= this.st.lock.acquire();
+        return this.st.respond(session, kind, answer);
+    }
+
+    public #Tokens refresh(String refreshToken) {
+        LockGuard g #= this.st.lock.acquire();
+        return this.st.refresh(refreshToken);
+    }
+
+    public void signOut(String refreshToken) {
+        LockGuard g #= this.st.lock.acquire();
+        this.st.signOut(refreshToken);
+        return;
+    }
+
+    public void forgotPassword(String username) {
+        LockGuard g #= this.st.lock.acquire();
+        this.st.forgotPassword(username);
+        return;
+    }
+
+    public void confirmForgotPassword(String username, String code,
+                                      String newPassword) {
+        LockGuard g #= this.st.lock.acquire();
+        this.st.confirmForgotPassword(username, code, newPassword);
+        return;
+    }
+
+    public #TotpEnrollment enrollTotpForChallenge(String session) {
+        LockGuard g #= this.st.lock.acquire();
+        return this.st.enrollTotpForChallenge(session);
+    }
+}

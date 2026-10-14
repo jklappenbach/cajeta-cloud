@@ -1,0 +1,38 @@
+package dev.cajeta.cloud.identity;
+
+import cajeta.lang.String;
+
+/**
+ * The public plane (identity spec §4, §6, §15.1): sign-in, challenges,
+ * refresh, sign-out and password reset. Every call is keyed by username
+ * or by a token the caller holds, never by server credentials. Sign-in
+ * is never retried automatically (§11.2): a retry is an attempt against
+ * the lockout counter.
+ */
+public interface Authenticator {
+
+    /** Password sign-in: tokens, or a challenge (§4.1). */
+    #SignInResult signIn(String username, String password);
+
+    /** Sign-in naming a {@link Factor} other than PASSWORD (§15.3, §15.18). */
+    #SignInResult signInWith(String username, int32 factor);
+
+    /** Answer a challenge; `kind` is the {@link ChallengeKind} answered (§15.5). */
+    #SignInResult respond(String session, int32 kind, ChallengeAnswer answer);
+
+    /** New tokens from a refresh token, or invalid-token (§4.5, §15.7). */
+    #Tokens refresh(String refreshToken);
+
+    /** Revoke one session's refresh token; needs REVOCATION (§15.8). */
+    void signOut(String refreshToken);
+
+    /** Deliver a reset code; an unknown username is not reported (§15.9, §15.14). */
+    void forgotPassword(String username);
+
+    /** Complete a reset with the delivered code (§15.9). */
+    void confirmForgotPassword(String username, String code,
+                               String newPassword);
+
+    /** Inside MFA_SETUP: the secret, shown once, and the session to answer (§15.6). */
+    #TotpEnrollment enrollTotpForChallenge(String session);
+}

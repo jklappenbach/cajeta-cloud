@@ -1,9 +1,7 @@
 package dev.cajeta.cloud.identity;
 
-import cajeta.codec.Base64;
 import cajeta.collection.ArrayList;
 import cajeta.concurrent.LockGuard;
-import cajeta.hash.Sha256;
 import cajeta.lang.Guid;
 import cajeta.lang.String;
 import dev.cajeta.cloud.Capabilities;
@@ -22,55 +20,127 @@ public final class MemoryUserPool implements UserPool {
 
     MemIdentityState st;
     MemoryIdentityHooks hookSeam;
-    Capabilities caps;
+    MemoryAuthenticator auth;
+    MemoryAccount acct;
+    MemoryTokenVerifier ver;
 
+    /** Every capability but PASSKEYS and INTROSPECTION (§8.2), on the wall clock. */
     public MemoryUserPool() {
-        this.init(true, true, true);
+        SystemTimeSource sys = heap SystemTimeSource();
+        String[] all #= MemoryUserPool.everything();
+        this.init(all, #sys);
         return;
+    }
+
+    /** Uninitialized; the factories call init. */
+    MemoryUserPool(int32 bare) { return; }
+
+    /**
+     * Every capability, on the given clock (§6.5). The pool borrows the
+     * clock, so the caller keeps it alive longer than the pool.
+     */
+    public static #MemoryUserPool withClock(TimeSource clock) {
+        MemoryUserPool p = heap MemoryUserPool(0);
+        String[] all #= MemoryUserPool.everything();
+        p.init(all, #clock);
+        return #p;
     }
 
     /** A driver declaring only the given capabilities, for undeclared-branch tests. */
     public static #MemoryUserPool withCapabilities(boolean confirmation,
                                                    boolean customAttributes,
                                                    boolean groups) {
-        MemoryUserPool p = heap MemoryUserPool();
-        p.init(confirmation, customAttributes, groups);
+        int32 n = 0;
+        if (confirmation) { n = n + 1; }
+        if (customAttributes) { n = n + 1; }
+        if (groups) { n = n + 1; }
+        String[] names = heap String[n];
+        int32 i = 0;
+        if (confirmation) { names[i] #= IdentityCapability.CONFIRMATION(); i = i + 1; }
+        if (customAttributes) { names[i] #= IdentityCapability.CUSTOM_ATTRIBUTES(); i = i + 1; }
+        if (groups) { names[i] #= IdentityCapability.GROUPS(); i = i + 1; }
+        return MemoryUserPool.declaring(names);
+    }
+
+    /** A driver declaring exactly the named capabilities, on the wall clock. */
+    public static #MemoryUserPool declaring(String[] capabilities) {
+        MemoryUserPool p = heap MemoryUserPool(0);
+        SystemTimeSource sys = heap SystemTimeSource();
+        p.init(capabilities, #sys);
         return #p;
     }
 
-    void init(boolean confirmation, boolean customAttributes,
-              boolean groups) {
-        this.st #= heap MemIdentityState(confirmation, customAttributes,
-            groups);
-        this.hookSeam #= heap MemoryIdentityHooks(this.st);
+    /** What the memory driver declares by default: all of §8.1 and §15.12, §15.18 but PASSKEYS and INTROSPECTION. */
+    static #String[] everything() {
+        String[] out = [IdentityCapability.CONFIRMATION(),
+            IdentityCapability.TOTP(), IdentityCapability.SMS_OTP(),
+            IdentityCapability.EMAIL_OTP(), IdentityCapability.REFRESH(),
+            IdentityCapability.REVOCATION(),
+            IdentityCapability.CUSTOM_ATTRIBUTES(),
+            IdentityCapability.GROUPS(), IdentityCapability.JWKS(),
+            IdentityCapability.ADMIN(), IdentityCapability.PASSWORD_RESET(),
+            IdentityCapability.PASSWORDLESS(),
+            IdentityCapability.TOTP_SIGN_IN()];
+        return #out;
+    }
+
+    static #String caveat(String capability) {
+        String c = "";
+        if (capability.equals("identity.confirmation")
+                || capability.equals("identity.sms-otp")
+                || capability.equals("identity.email-otp")
+                || capability.equals("identity.password-reset")) {
+            c = "codes are exposed through MemoryIdentityHooks, never sent";
+        }
+        if (capability.equals("identity.custom-attributes")) {
+            c = "names are 1 to 64 bytes without whitespace";
+        }
+        if (capability.equals("identity.totp")
+                || capability.equals("identity.totp-sign-in")) {
+            c = "seeds are held in process memory only and die with it (§15.18.9)";
+        }
+        if (capability.equals("identity.jwks")) {
+            c = "HS256 under a per-process key; the JWKS publishes it, so it is for tests and development only";
+        }
+        return #c;
+    }
+
+    void init(String[] declared, TimeSource clock) {
+        this.st #= heap MemIdentityState(#clock);
         Capabilities c = heap Capabilities("memory");
-        if (confirmation) {
-            c.declare(IdentityCapability.CONFIRMATION(),
-                "codes are exposed through MemoryIdentityHooks, never sent");
+        int32 i = 0;
+        while (i < declared.count()) {
+            String note #= MemoryUserPool.caveat(declared[i]);
+            c.declare(declared[i], note);
+            i = i + 1;
         }
-        if (customAttributes) {
-            c.declare(IdentityCapability.CUSTOM_ATTRIBUTES(),
-                "names are 1 to 64 bytes without whitespace");
-        }
-        if (groups) {
-            c.declare(IdentityCapability.GROUPS(), "");
-        }
-        this.caps #= c;
+        this.st.caps #= c;
+        this.hookSeam #= heap MemoryIdentityHooks(this.st);
+        this.auth #= heap MemoryAuthenticator(this.st);
+        this.acct #= heap MemoryAccount(this.st);
+        this.ver #= heap MemoryTokenVerifier(this.st);
         return;
     }
 
     /** The test seam (§3.7). */
     public MemoryIdentityHooks hooks() { return this.hookSeam; }
 
-    public Capabilities capabilities() { return this.caps; }
+    public Capabilities capabilities() { return this.st.caps; }
+
+    public Authenticator authenticator() { return this.auth; }
+
+    public Account account() { return this.acct; }
+
+    public TokenVerifier verifier() { return this.ver; }
+
+    /** Require TOTP of every password sign-in: a user without it is answered MFA_SETUP (§6.1). */
+    public void requireTotp(boolean required) {
+        this.st.totpRequired = required;
+        return;
+    }
 
     void requireCap(String capability, String operation, String subject) {
-        if (!this.caps.supports(capability)) {
-            throw heap IdentityException(
-                IdentityException.UNSUPPORTED_CAPABILITY(), "memory",
-                operation, subject, "capability '" + capability
-                + "' is not supported by adapter 'memory'");
-        }
+        this.st.requireCap(capability, operation, subject);
         return;
     }
 
@@ -95,52 +165,23 @@ public final class MemoryUserPool implements UserPool {
         return;
     }
 
-    /** `sha256-salted$<salt>$<hash>`: the tag lets the hash change later without stranding users. */
-    static #String passwordRecord(String password) {
-        String saltText #= Guid.random().toString();
-        int8[] salt #= saltText.toBytes();
-        int8[] pw #= password.toBytes();
-        int64 saltLen = (int64) saltText.byteLength();
-        int64 pwLen = (int64) password.byteLength();
-        int8[] buf = heap int8[saltLen + pwLen];
-        int64 i = 0;
-        while (i < saltLen) { buf[i] = salt[i]; i = i + 1; }
-        i = 0;
-        while (i < pwLen) { buf[saltLen + i] = pw[i]; i = i + 1; }
-        int8[] digest #= Sha256.hash(buf, saltLen + pwLen);
-        String out #= "sha256-salted$" + saltText + "$"
-            + Base64.encode(digest, (int64) 32);
-        return #out;
-    }
-
     static #String freshCode(boolean wanted) {
         if (!wanted) {
             String none = "";
             return #none;
         }
-        Guid g #= Guid.random();
-        int64 n = (int64) g.low();
-        if (n < 0) { n = -(n + 1); }
-        n = n % 1000000;
-        int8[] d = heap int8[6];
-        int32 i = 5;
-        while (i >= 0) {
-            d[i] = (int8) (48 + n % 10);
-            n = n / 10;
-            i = i - 1;
-        }
-        String out = heap String(#d, 6);
-        return #out;
+        return MemCrypto.sixDigits();
     }
 
     #RegistrationResult create(String username, String password,
-                               Attributes attributes, String operation) {
+                               Attributes attributes, String operation,
+                               boolean passwordless) {
         if (username.byteLength() < 1) {
             throw heap IdentityException(
                 IdentityException.POLICY_VIOLATION(), "memory", operation,
                 username, "username must not be empty");
         }
-        if (password.byteLength() < 8) {
+        if (!passwordless && password.byteLength() < 8) {
             throw heap IdentityException(
                 IdentityException.POLICY_VIOLATION(), "memory", operation,
                 username, "password must be at least 8 bytes");
@@ -155,10 +196,13 @@ public final class MemoryUserPool implements UserPool {
                 i = i + 1;
             }
         }
-        String rec #= MemoryUserPool.passwordRecord(password);
+        String rec = "";
+        if (!passwordless) { rec #= MemCrypto.passwordRecord(password); }
         Attributes attrs #= attributes.copy();
-        String code #= MemoryUserPool.freshCode(this.st.confirmation);
-        boolean confirmed = !this.st.confirmation;
+        boolean confirmation = this.st.caps.supports(
+            IdentityCapability.CONFIRMATION());
+        String code #= MemoryUserPool.freshCode(confirmation);
+        boolean confirmed = !confirmation;
         LockGuard g #= this.st.lock.acquire();
         if (this.st.subjectByName.containsKey(username)) {
             throw heap IdentityException(IdentityException.USER_EXISTS(),
@@ -177,12 +221,21 @@ public final class MemoryUserPool implements UserPool {
 
     public #RegistrationResult register(String username, String password) {
         Attributes none = heap Attributes();
-        return this.create(username, password, none, "register");
+        return this.create(username, password, none, "register", false);
     }
 
     public #RegistrationResult registerWith(String username, String password,
                                             Attributes attributes) {
-        return this.create(username, password, attributes, "registerWith");
+        return this.create(username, password, attributes, "registerWith",
+            false);
+    }
+
+    public #RegistrationResult registerPasswordless(String username,
+                                                    Attributes attributes) {
+        this.requireCap(IdentityCapability.PASSWORDLESS(),
+            "registerPasswordless", username);
+        return this.create(username, "", attributes, "registerPasswordless",
+            true);
     }
 
     public void confirm(String username, String code) {
@@ -239,6 +292,8 @@ public final class MemoryUserPool implements UserPool {
         MemUser u = this.st.bySubject.get(subject);
         if (u == null) { return false; }
         String name = "" + u.username;
+        String id = "" + subject;
+        this.st.revokeAll(id);
         String droppedId #= this.st.subjectByName.remove(name);
         MemUser dropped #= this.st.bySubject.remove(subject);
         return true;

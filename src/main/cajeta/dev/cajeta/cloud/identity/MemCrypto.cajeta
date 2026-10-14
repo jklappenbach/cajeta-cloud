@@ -1,0 +1,181 @@
+package dev.cajeta.cloud.identity;
+
+import cajeta.codec.Base64;
+import cajeta.hash.Hash;
+import cajeta.hash.Pbkdf2;
+import cajeta.hash.SecureRandom;
+import cajeta.hash.Sha256;
+import cajeta.hash.Totp;
+import cajeta.lang.Guid;
+import cajeta.lang.String;
+
+/**
+ * The memory driver's secrets (identity spec §4.7, §15.18): password
+ * records, delivered codes, opaque handles and TOTP matching. Every
+ * random byte comes from the CSPRNG.
+ */
+final class MemCrypto {
+
+    /** OWASP's 2023 floor for PBKDF2-HMAC-SHA256. */
+    static int32 ITERATIONS() { return 600000; }
+
+    /** The '$'-separated field `index` of a record, or "". */
+    static #String field(String rec, int32 index) {
+        int32 n = rec.byteLength();
+        int32 start = 0;
+        int32 seen = 0;
+        int32 i = 0;
+        while (i <= n) {
+            if (i == n || rec.byteAt(i) == (int8) 36) {
+                if (seen == index) { return rec.substring(start, i); }
+                seen = seen + 1;
+                start = i + 1;
+            }
+            i = i + 1;
+        }
+        String none = "";
+        return #none;
+    }
+
+    static int32 parseInt(String s) {
+        int32 v = 0;
+        int32 i = 0;
+        if (s.byteLength() == 0 || s.byteLength() > 9) { return -1; }
+        while (i < s.byteLength()) {
+            int32 c = ((int32) s.byteAt(i)) & 0xff;
+            if (c < 48 || c > 57) { return -1; }
+            v = v * 10 + (c - 48);
+            i = i + 1;
+        }
+        return v;
+    }
+
+    static boolean sameText(String a, String b) {
+        int8[] x #= a.toBytes();
+        int8[] y #= b.toBytes();
+        return Hash.constantTimeEquals(x, (int64) a.byteLength(), y,
+            (int64) b.byteLength());
+    }
+
+    /** `pbkdf2-sha256$<iterations>$<salt>$<hash>`, salt and hash in Base64. */
+    static #String passwordRecord(String password) {
+        int8[] salt #= SecureRandom.bytes(16L);
+        int8[] pw #= password.toBytes();
+        int32 iterations = MemCrypto.ITERATIONS();
+        int8[] dk #= Pbkdf2.sha256(pw, (int64) password.byteLength(), salt,
+            16L, iterations, 32);
+        String out #= "pbkdf2-sha256$" + iterations + "$"
+            + Base64.encode(salt, 16L) + "$" + Base64.encode(dk, 32L);
+        return #out;
+    }
+
+    /** The Unit 1 record, `sha256-salted$<salt>$<hash>`: kept so old records still verify. */
+    static #String legacyRecord(String password) {
+        String saltText #= Guid.random().toString();
+        String digest #= MemCrypto.legacyDigest(saltText, password);
+        String out #= "sha256-salted$" + saltText + "$" + digest;
+        return #out;
+    }
+
+    static #String legacyDigest(String saltText, String password) {
+        int8[] salt #= saltText.toBytes();
+        int8[] pw #= password.toBytes();
+        int64 saltLen = (int64) saltText.byteLength();
+        int64 pwLen = (int64) password.byteLength();
+        int8[] buf = heap int8[saltLen + pwLen];
+        int64 i = 0;
+        while (i < saltLen) { buf[i] = salt[i]; i = i + 1; }
+        i = 0;
+        while (i < pwLen) { buf[saltLen + i] = pw[i]; i = i + 1; }
+        int8[] digest #= Sha256.hash(buf, saltLen + pwLen);
+        return Base64.encode(digest, 32L);
+    }
+
+    /** True when `record` is the current form, so a successful sign-in need not rehash. */
+    static boolean isCurrent(String rec) {
+        return rec.startsWith("pbkdf2-sha256$");
+    }
+
+    /** Whether `password` matches `record`; an empty record (passwordless) never does. */
+    static boolean matches(String rec, String password) {
+        if (rec.startsWith("pbkdf2-sha256$")) {
+            String iterText #= MemCrypto.field(rec, 1);
+            int32 iterations = MemCrypto.parseInt(iterText);
+            if (iterations < 1) { return false; }
+            String saltText #= MemCrypto.field(rec, 2);
+            String want #= MemCrypto.field(rec, 3);
+            int8[] salt #= Base64.decode(saltText);
+            int8[] pw #= password.toBytes();
+            int8[] dk #= Pbkdf2.sha256(pw, (int64) password.byteLength(),
+                salt, (int64) salt.count(), iterations, 32);
+            String got #= Base64.encode(dk, 32L);
+            return MemCrypto.sameText(got, want);
+        }
+        if (rec.startsWith("sha256-salted$")) {
+            String saltText #= MemCrypto.field(rec, 1);
+            String want #= MemCrypto.field(rec, 2);
+            String got #= MemCrypto.legacyDigest(saltText, password);
+            return MemCrypto.sameText(got, want);
+        }
+        return false;
+    }
+
+    /** The same work as a real check, against nothing: an unknown user costs what a known one does (§15.14). */
+    static void burn(String password) {
+        int8[] pw #= password.toBytes();
+        int8[] salt = heap int8[16];
+        int8[] dk #= Pbkdf2.sha256(pw, (int64) password.byteLength(), salt,
+            16L, MemCrypto.ITERATIONS(), 32);
+        return;
+    }
+
+    /** Six digits from the CSPRNG. */
+    static #String sixDigits() {
+        int8[] r #= SecureRandom.bytes(4L);
+        int64 v = ((((int64) r[0]) & 255L) << 24) | ((((int64) r[1]) & 255L) << 16)
+            | ((((int64) r[2]) & 255L) << 8) | (((int64) r[3]) & 255L);
+        return Totp.format((int32) (v % 1000000L), 6);
+    }
+
+    /** An opaque handle: `n` CSPRNG bytes in URL-safe Base64. */
+    static #String handle(int64 n) {
+        int8[] r #= SecureRandom.bytes(n);
+        return Base64.encodeUrlSafe(r, n);
+    }
+
+    /** What the driver keys a refresh token by: its SHA-256, so the map holds no live token. */
+    static #String digestKey(String token) {
+        int8[] b #= token.toBytes();
+        int8[] d #= Sha256.hash(b, (int64) token.byteLength());
+        return Base64.encodeUrlSafe(d, 32L);
+    }
+
+    static #int8[] copy(int8[] src, int64 n) {
+        int8[] out = heap int8[n];
+        int64 i = 0;
+        while (i < n) { out[i] = src[i]; i = i + 1; }
+        return #out;
+    }
+
+    /**
+     * The step a six-digit code matches, within one step either side of
+     * `now` and after `lastStep` (a code is accepted once, §15.18.5), or
+     * -1.
+     */
+    static int64 totpStep(int8[] secret, int64 secretLen, String code,
+                          int64 now, int64 lastStep) {
+        if (code.byteLength() != 6) { return -1L; }
+        int32 want = MemCrypto.parseInt(code);
+        if (want < 0) { return -1L; }
+        int64 step = now / 30L;
+        int64 d = -1L;
+        while (d <= 1L) {
+            int64 s = step + d;
+            if (s > lastStep && Totp.hotp(secret, secretLen, s, 6) == want) {
+                return s;
+            }
+            d = d + 1L;
+        }
+        return -1L;
+    }
+}

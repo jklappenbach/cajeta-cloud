@@ -1,0 +1,51 @@
+package dev.cajeta.cloud.identity;
+
+import cajeta.collection.ArrayList;
+import cajeta.lang.String;
+
+/**
+ * A challenge-required answer (identity spec §6.1, §15.4): its kind, the
+ * opaque session that answers it, a string-to-string parameter map (the
+ * masked destination of a code, the factors that can be set up, the
+ * required attributes) and, for SELECT_FACTOR, the factor options.
+ */
+public final class Challenge {
+
+    int32 kindCode;
+    String sessionHandle;
+    Attributes params;
+    ArrayList<int32> opts;
+
+    public Challenge(int32 kind, String session, #Attributes parameters) {
+        this.kindCode = kind;
+        this.sessionHandle = "" + session;
+        this.params #= parameters;
+        this.opts = heap ArrayList<int32>();
+        return;
+    }
+
+    /** A {@link ChallengeKind} value. */
+    public int32 kind() { return this.kindCode; }
+
+    /** The opaque handle {@link Authenticator#respond} takes. */
+    public #String session() {
+        String out = "" + this.sessionHandle;
+        return #out;
+    }
+
+    /** The parameters, a view into this challenge. */
+    public Attributes parameters() { return this.params; }
+
+    /** One parameter, or "" when absent. */
+    public #String parameter(String name) { return this.params.get(name); }
+
+    public void addOption(int32 factor) {
+        this.opts.add(factor);
+        return;
+    }
+
+    public int32 optionCount() { return this.opts.count(); }
+
+    /** A {@link Factor} value. */
+    public int32 optionAt(int32 i) { return this.opts.get(i); }
+}

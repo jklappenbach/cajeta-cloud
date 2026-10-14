@@ -134,13 +134,59 @@ User ada #= pool.lookupByName("ada");
 ```
 
 `MemoryUserPool` is the reference implementation and the default when
-no adapter is compiled in. It stores a salted hash under a format tag
-(`sha256-salted$salt$hash` today, PBKDF2-SHA256 once the toolchain that
-ships `cajeta.hash.Pbkdf2` is pinned), never a password, and it never
-fakes a delivery channel: the confirmation code a test needs comes from
-`MemoryUserPool.hooks()` (§3.7). Failures are `IdentityException` with
-one of the §11.1 kinds. Authentication, challenges and tokens are the
-full cut and follow with primavera's security phase.
+no adapter is compiled in. It stores a password as PBKDF2-SHA256 under a
+format tag (`pbkdf2-sha256$600000$salt$hash`; a Unit 1
+`sha256-salted$salt$hash` record still signs in and is rehashed when it
+does), never the password, and it never fakes a delivery channel: every
+code a test needs comes from `MemoryUserPool.hooks()` (§3.7, §6.5).
+Failures are `IdentityException` with one of the §11.1 kinds.
+
+### Signing in
+
+The pool is the administrative plane. The other three are reached through
+it, so choosing a pool chooses all four (§15.1):
+
+- `pool.authenticator()` is the public plane: `signIn(username, password)`,
+  `signInWith(username, Factor.EMAIL_OTP())` (or `SMS_OTP`, `TOTP`),
+  `respond(session, kind, answer)`, `refresh`, `signOut`,
+  `forgotPassword` / `confirmForgotPassword`, and `enrollTotpForChallenge`
+  inside `MFA_SETUP`.
+- `pool.account()` is the self-service plane, every call keyed by the
+  caller's access token: `me`, `updateAttributes`, `changePassword`,
+  `deleteMe`, `enrollTotp` / `activateTotp`, `signOutEverywhere`.
+- `pool.verifier()` checks a token's signature, issuer, audience, expiry and
+  use, and names the check that failed. `jwks()` publishes the keys.
+
+```cajeta
+Authenticator auth = pool.authenticator();
+SignInResult r #= auth.signIn("ada", "correct horse battery");
+while (r.isChallenge()) {                              // TOTP, EMAIL_OTP, ...
+    String session #= r.challenge().session();
+    r #= auth.respond(session, r.challenge().kind(),
+        ChallengeAnswer.code(codeFromTheUser));
+}
+Claims c #= pool.verifier().verify(r.tokens().accessToken(), TokenUse.ACCESS());
+```
+
+Sign-in is password-free when the application wants it (§15.18):
+`registerPasswordless(username, attributes)` makes an account with no
+password, which signs in with an emailed or texted code, or with an
+authenticator app alone under `TOTP_SIGN_IN`. TOTP is RFC 6238 at SHA-1, six
+digits and thirty seconds, so Microsoft and Google Authenticator read the
+`otpauth://` URI that enrollment returns. A wrong password and an unknown
+username answer the same `INVALID_CREDENTIALS` and the same message.
+
+The memory driver signs HS256 under a per-pool key from the CSPRNG and
+publishes it in the JWKS, so tokens verify the same way against it and
+against a provider, and a test can check them without the driver
+(§5.5, §10.4). Tokens last an hour, refresh tokens thirty days, codes three
+minutes and reset codes an hour. Five wrong passwords or codes lock an
+account for thirty seconds, doubling to fifteen minutes, and the error
+carries `retryAfter()`. Signing out ends the session: its refresh token and
+every Account call stop working, while an offline `verify` still accepts its
+access token until it expires, as Cognito's does (§4.6). Its clock is a
+`TimeSource`: `MemoryUserPool.withClock(clock)` over a `ManualTimeSource` lets a
+test move time.
 
 ### Choosing the pool
 
@@ -215,7 +261,12 @@ lacking it would surface as data corruption, not a startup error.
 | `identity.confirmation` | yes (code via hooks) | — | Cognito adapter |
 | `identity.custom-attributes` | yes | — | Cognito adapter |
 | `identity.groups` | yes | — | Cognito adapter |
-| `identity.totp` / `sms-otp` / `email-otp` / `refresh` / `revocation` / `jwks` | full cut | — | Cognito adapter |
+| `identity.totp` / `sms-otp` / `email-otp` | yes (codes via hooks) | — | Cognito adapter |
+| `identity.refresh` / `revocation` / `admin` / `password-reset` | yes | — | Cognito adapter |
+| `identity.jwks` | yes (HS256, key published) | — | Cognito adapter (RS256, needs RSA in the stdlib) |
+| `identity.passwordless` | yes | — | Cognito adapter (Essentials tier) |
+| `identity.totp-sign-in` | yes | — | no: Cognito takes TOTP as a second factor only |
+| `identity.passkeys` / `introspection` | no | — | Cognito adapter |
 
 ## The conformance testkit — `dev.cajeta.cloud.testkit`
 
@@ -227,8 +278,14 @@ ObjectStoreContract.verify(myAdapter, "conformance-scratch/");
 ```
 
 `IdentityContract.verify(myPool, myHooks, "conformance-")` is the same
-thing for the identity port, and a pool whose register skips the
-uniqueness check fails it (`IdentityTest::skippedUniquenessIsCaught`).
+thing for the identity port, the full port included, and a pool whose
+register skips the uniqueness check fails it
+(`IdentityTest::skippedUniquenessIsCaught`). `verifyWithClock` takes the
+pool's `ManualTimeSource` too, for the cases that move time (expiry,
+lockout lifting, TOTP steps); without one they are skipped, as are the
+cases that need a delivered code when there are no hooks. Each section of
+`AuthenticationContract` fails a driver that always succeeds at what it
+covers (`LiarTest`).
 
 One suite, whole port, pass or fail. Selection is
 capability-conditional (declared → tested; undeclared → asserted to

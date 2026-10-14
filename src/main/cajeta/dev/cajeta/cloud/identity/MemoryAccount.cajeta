@@ -1,0 +1,60 @@
+package dev.cajeta.cloud.identity;
+
+import cajeta.concurrent.LockGuard;
+import cajeta.lang.String;
+
+/**
+ * The memory driver's self-service plane (identity spec §15.1). A call
+ * is accepted only with an access token that verifies and whose sign-in
+ * has not been signed out.
+ */
+public final class MemoryAccount implements Account {
+
+    MemIdentityState st;
+
+    MemoryAccount(MemIdentityState st) {
+        this.st #= st;
+        return;
+    }
+
+    public #User me(String accessToken) {
+        LockGuard g #= this.st.lock.acquire();
+        return this.st.me(accessToken);
+    }
+
+    public void updateAttributes(String accessToken, Attributes attributes) {
+        LockGuard g #= this.st.lock.acquire();
+        this.st.updateAttributes(accessToken, attributes);
+        return;
+    }
+
+    public void changePassword(String accessToken, String oldPassword,
+                               String newPassword) {
+        LockGuard g #= this.st.lock.acquire();
+        this.st.changePassword(accessToken, oldPassword, newPassword);
+        return;
+    }
+
+    public void deleteMe(String accessToken) {
+        LockGuard g #= this.st.lock.acquire();
+        this.st.deleteMe(accessToken);
+        return;
+    }
+
+    public #TotpEnrollment enrollTotp(String accessToken) {
+        LockGuard g #= this.st.lock.acquire();
+        return this.st.enrollTotp(accessToken);
+    }
+
+    public void activateTotp(String accessToken, String code) {
+        LockGuard g #= this.st.lock.acquire();
+        this.st.activateTotp(accessToken, code);
+        return;
+    }
+
+    public void signOutEverywhere(String accessToken) {
+        LockGuard g #= this.st.lock.acquire();
+        this.st.signOutEverywhere(accessToken);
+        return;
+    }
+}

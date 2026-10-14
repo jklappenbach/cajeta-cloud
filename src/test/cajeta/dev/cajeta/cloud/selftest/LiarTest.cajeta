@@ -1,0 +1,91 @@
+package dev.cajeta.cloud.selftest;
+
+import cajeta.lang.String;
+import dev.cajeta.unit.Assert;
+import dev.cajeta.cloud.CloudException;
+import dev.cajeta.cloud.identity.ManualTimeSource;
+import dev.cajeta.cloud.identity.MemoryUserPool;
+import dev.cajeta.cloud.testkit.AuthenticationContract;
+import dev.cajeta.cloud.testkit.IdentityContract;
+
+/**
+ * Identity plan 3.3.2 and spec §13.1: every contract section over the
+ * full port fails a driver that always succeeds at what the section
+ * covers, and names the check that caught it. The honest wrapper passes
+ * every section, so the failures are the lies and not the wrapper.
+ */
+public class LiarTest {
+
+    public LiarTest() { return; }
+
+    /** The check id a section throws with against `lie`, or "" when it passes. */
+    static #String caughtBy(String section, int32 lie) {
+        ManualTimeSource clock = heap ManualTimeSource(1700000000L);
+        LiarPool p = heap LiarPool(lie, clock);
+        String got = "";
+        try {
+            AuthenticationContract.section(section, p, p.hooks(), clock, "lz-");
+        } catch (CloudException e) {
+            got #= "" + e.message;
+        }
+        return #got;
+    }
+
+    static boolean catches(String section, int32 lie, String check) {
+        String got #= LiarTest.caughtBy(section, lie);
+        if (!got.contains(check)) {
+            Assert.fail("section " + section + " against lie " + lie
+                + " should fail at " + check + "; got: " + got);
+        }
+        return true;
+    }
+
+    @Test
+    public void theHonestWrapperPassesTheWholeContract() {
+        ManualTimeSource clock = heap ManualTimeSource(1700000000L);
+        LiarPool p = heap LiarPool(Lie.NONE(), clock);
+        AuthenticationContract.verify(p, p.hooks(), clock, "hz-");
+    }
+
+    @Test
+    public void passwordSectionsCatchAnAlwaysSuccessfulSignIn() {
+        Assert.isTrue(LiarTest.catches("signin", Lie.SIGNIN(),
+            "signin-unconfirmed"));
+        Assert.isTrue(LiarTest.catches("signin", Lie.WRONG_PASSWORD(),
+            "signin-wrong"));
+        Assert.isTrue(LiarTest.catches("lockout", Lie.SIGNIN(), "lockout-locks"));
+        Assert.isTrue(LiarTest.catches("passwordless", Lie.SIGNIN(),
+            "passwordless-no-password"));
+        Assert.isTrue(LiarTest.catches("signin", Lie.UNKNOWN_DIFFERS(),
+            "signin-unknown"));
+    }
+
+    @Test
+    public void codeSectionsCatchAnAlwaysSuccessfulAnswer() {
+        Assert.isTrue(LiarTest.catches("otp", Lie.RESPOND(), "otp-wrong"));
+        Assert.isTrue(LiarTest.catches("totp", Lie.RESPOND(), "totp-wrong"));
+        Assert.isTrue(LiarTest.catches("code-lockout", Lie.RESPOND(),
+            "code-lockout"));
+        Assert.isTrue(LiarTest.catches("totp", Lie.ACCOUNT(),
+            "totp-wrong-activation"));
+        Assert.isTrue(LiarTest.catches("reset", Lie.RESET(), "reset-wrong"));
+    }
+
+    @Test
+    public void tokenSectionsCatchBelievingAndRevokingNothing() {
+        Assert.isTrue(LiarTest.catches("tokens", Lie.VERIFY(), "token-use"));
+        Assert.isTrue(LiarTest.catches("tokens", Lie.JWKS(), "token-jwks"));
+        Assert.isTrue(LiarTest.catches("refresh", Lie.SIGNOUT_NOOP(),
+            "refresh-revoked"));
+        Assert.isTrue(LiarTest.catches("account", Lie.ACCOUNT(),
+            "account-revoked"));
+        Assert.isTrue(LiarTest.catches("redaction", Lie.LEAKY(), "redaction"));
+    }
+
+    @Test
+    public void fullContractPassesTheMemoryDriverOnAManualClock() {
+        ManualTimeSource clock = heap ManualTimeSource(1700000000L);
+        MemoryUserPool p #= MemoryUserPool.withClock(clock);
+        IdentityContract.verifyWithClock(p, p.hooks(), clock, "tkc-");
+    }
+}

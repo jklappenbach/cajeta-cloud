@@ -1,0 +1,18 @@
+package dev.cajeta.cloud.identity;
+
+import cajeta.lang.String;
+
+/** A live refresh token: its user, the sign-in it belongs to, its expiry. */
+final class MemRefresh {
+
+    String subject;
+    String origin;
+    int64 expiresAt;
+
+    MemRefresh(String subject, String origin, int64 expiresAt) {
+        this.subject = "" + subject;
+        this.origin = "" + origin;
+        this.expiresAt = expiresAt;
+        return;
+    }
+}

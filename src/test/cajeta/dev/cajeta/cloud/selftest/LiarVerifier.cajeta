@@ -1,0 +1,41 @@
+package dev.cajeta.cloud.selftest;
+
+import cajeta.codec.Base64;
+import cajeta.hash.SecureRandom;
+import cajeta.lang.String;
+import dev.cajeta.cloud.identity.Claims;
+import dev.cajeta.cloud.identity.DecodedJwt;
+import dev.cajeta.cloud.identity.Jwks;
+import dev.cajeta.cloud.identity.Jwt;
+import dev.cajeta.cloud.identity.MemoryUserPool;
+import dev.cajeta.cloud.identity.TokenVerifier;
+
+/** The verifier of a {@link LiarPool}. */
+final class LiarVerifier implements TokenVerifier {
+
+    MemoryUserPool pool;
+    int32 lie;
+
+    LiarVerifier(MemoryUserPool pool, int32 lie) {
+        this.pool #= pool;
+        this.lie = lie;
+        return;
+    }
+
+    public #Claims verify(String token, int32 expectedUse) {
+        if (this.lie != Lie.VERIFY()) {
+            return this.pool.verifier().verify(token, expectedUse);
+        }
+        DecodedJwt d #= Jwt.decode(token, "memory", "verify");
+        return d.claims();
+    }
+
+    public #Jwks jwks() {
+        if (this.lie != Lie.JWKS()) { return this.pool.verifier().jwks(); }
+        int8[] other #= SecureRandom.bytes(32L);
+        String k #= Base64.encodeUrlSafe(other, 32L);
+        Jwks out = heap Jwks("{\"keys\":[{\"kty\":\"oct\",\"alg\":\"HS256\","
+            + "\"kid\":\"x\",\"k\":\"" + k + "\"}]}");
+        return #out;
+    }
+}

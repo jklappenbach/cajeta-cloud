@@ -1,0 +1,43 @@
+package dev.cajeta.cloud.identity;
+
+import cajeta.lang.String;
+
+/**
+ * A TOTP enrollment (identity spec §6.3, §15.6, §15.18.3): the shared
+ * secret in Base32, shown once, and the `otpauth://` URI an application
+ * renders as a QR code. The parameters are fixed at SHA-1, six digits
+ * and thirty seconds, the floor every authenticator app honours. Inside
+ * MFA_SETUP the session answers the challenge once a first code proves
+ * the authenticator; after sign-in it is empty.
+ */
+public final class TotpEnrollment {
+
+    String secretText;
+    String uriText;
+    String sessionHandle;
+
+    public TotpEnrollment(String secretBase32, String uri, String session) {
+        this.secretText = "" + secretBase32;
+        this.uriText = "" + uri;
+        this.sessionHandle = "" + session;
+        return;
+    }
+
+    /** The shared secret, Base32 without padding. */
+    public #String secret() {
+        String out = "" + this.secretText;
+        return #out;
+    }
+
+    /** `otpauth://totp/<issuer>:<label>?secret=…&issuer=…`. */
+    public #String uri() {
+        String out = "" + this.uriText;
+        return #out;
+    }
+
+    /** The MFA_SETUP session to answer, or "" after sign-in. */
+    public #String session() {
+        String out = "" + this.sessionHandle;
+        return #out;
+    }
+}

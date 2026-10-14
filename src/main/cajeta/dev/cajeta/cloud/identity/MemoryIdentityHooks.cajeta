@@ -4,9 +4,10 @@ import cajeta.concurrent.LockGuard;
 import cajeta.lang.String;
 
 /**
- * The memory driver's test seam (identity spec §3.7): the last
- * confirmation code per user, and the stored password record so a test
- * can assert its format tag without ever seeing a password.
+ * The memory driver's test seam (identity spec §3.7, §6.5): the last
+ * confirmation, sign-in and reset code per user, the stored password
+ * record so a test can assert its format tag without ever seeing a
+ * password, and two levers for states a test cannot reach otherwise.
  */
 public final class MemoryIdentityHooks implements IdentityHooks {
 
@@ -30,5 +31,36 @@ public final class MemoryIdentityHooks implements IdentityHooks {
         MemUser u = this.st.find(subject, "passwordRecord");
         String out = "" + u.passwordRecord;
         return #out;
+    }
+
+    public #String lastSignInCode(String subject) {
+        LockGuard g #= this.st.lock.acquire();
+        MemUser u = this.st.find(subject, "lastSignInCode");
+        String out = "" + u.lastOtp;
+        return #out;
+    }
+
+    public #String lastPasswordResetCode(String subject) {
+        LockGuard g #= this.st.lock.acquire();
+        MemUser u = this.st.find(subject, "lastPasswordResetCode");
+        String out = "" + u.resetCode;
+        return #out;
+    }
+
+    /** Replace the stored record with the Unit 1 `sha256-salted` form, as a user created before PBKDF2 has it. */
+    public void useLegacyPassword(String subject, String password) {
+        String rec #= MemCrypto.legacyRecord(password);
+        LockGuard g #= this.st.lock.acquire();
+        MemUser u = this.st.find(subject, "useLegacyPassword");
+        u.passwordRecord #= rec;
+        return;
+    }
+
+    /** Make the next sign-in fail with password-reset-required (§15.9). */
+    public void requirePasswordReset(String subject) {
+        LockGuard g #= this.st.lock.acquire();
+        MemUser u = this.st.find(subject, "requirePasswordReset");
+        u.resetRequired = true;
+        return;
     }
 }

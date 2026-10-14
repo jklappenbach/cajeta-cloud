@@ -24,10 +24,12 @@ public class IdentityException extends RecoverableException {
     public static int32 UNSUPPORTED_CAPABILITY() { return 10; }
     public static int32 TRANSIENT()              { return 11; }
     public static int32 PROVIDER_ERROR()         { return 12; }
+    public static int32 PASSWORD_RESET_REQUIRED() { return 13; }
 
     int32 kindCode;
     String providerName;
     String operationName;
+    int64 retryAfterSecs;
 
     public IdentityException(int32 kind, String provider, String operation,
                              String subject, String detail) {
@@ -37,7 +39,21 @@ public class IdentityException extends RecoverableException {
         this.message = provider + ": " + operation + " '" + subject + "': "
             + detail;
         this.cause = 0;
+        this.retryAfterSecs = -1L;
     }
+
+    /** A locked failure carrying the provider's retry-after in seconds (§4.4). */
+    public static #IdentityException locked(String provider, String operation,
+                                            String subject, int64 retryAfter) {
+        IdentityException e = heap IdentityException(IdentityException.LOCKED(),
+            provider, operation, subject,
+            "too many failed attempts; retry after " + retryAfter + " s");
+        e.retryAfterSecs = retryAfter;
+        return #e;
+    }
+
+    /** Seconds until the provider accepts another attempt, or -1 when it reported none (§4.4). */
+    public int64 retryAfter() { return this.retryAfterSecs; }
 
     /** The failure kind (see the constants). */
     public int32 kind() { return this.kindCode; }

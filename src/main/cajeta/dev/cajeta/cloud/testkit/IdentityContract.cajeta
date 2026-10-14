@@ -9,6 +9,7 @@ import dev.cajeta.cloud.identity.Attributes;
 import dev.cajeta.cloud.identity.IdentityCapability;
 import dev.cajeta.cloud.identity.IdentityException;
 import dev.cajeta.cloud.identity.IdentityHooks;
+import dev.cajeta.cloud.identity.ManualTimeSource;
 import dev.cajeta.cloud.identity.RegistrationResult;
 import dev.cajeta.cloud.identity.User;
 import dev.cajeta.cloud.identity.UserPool;
@@ -40,9 +41,21 @@ public final class IdentityContract {
         return #p;
     }
 
-    /** Run the suite; throws on the first violation. */
+    /** Run the suite on the wall clock; throws on the first violation. */
     public static void verify(UserPool pool, IdentityHooks hooks,
                               String prefix) {
+        IdentityContract.verifyWithClock(pool, hooks, null, prefix);
+        return;
+    }
+
+    /**
+     * Run the suite, the full port included (AuthenticationContract).
+     * `clock` is the pool's manual clock, or null when time cannot be
+     * moved; the cases that move it are skipped then.
+     */
+    public static void verifyWithClock(UserPool pool, IdentityHooks hooks,
+                                       ManualTimeSource clock,
+                                       String prefix) {
         IdentityContract.registration(pool, prefix);
         IdentityContract.confirmation(pool, hooks, prefix);
         IdentityContract.attributes(pool, prefix);
@@ -50,6 +63,7 @@ public final class IdentityContract {
         IdentityContract.concurrentRegistration(pool, prefix);
         IdentityContract.bufferIndependence(pool, prefix);
         IdentityContract.errors(pool, prefix);
+        AuthenticationContract.verify(pool, hooks, clock, prefix);
         return;
     }
 

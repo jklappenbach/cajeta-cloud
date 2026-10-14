@@ -1,0 +1,249 @@
+package dev.cajeta.cloud.identity;
+
+import cajeta.codec.Base64;
+import cajeta.codec.Base64Exception;
+import cajeta.codec.json.Json;
+import cajeta.codec.json.JsonParseException;
+import cajeta.codec.json.JsonValue;
+import cajeta.hash.HmacSha256;
+import cajeta.lang.String;
+
+/**
+ * The port's JWT codec (identity spec §5, plan 3.2.3): compact
+ * serialization, base64url segments, HS256 signing, and claims. Verifiers
+ * against the memory driver and against adapters share it. RS256 and
+ * ES256 are recognized and refused by name until the stdlib can verify
+ * them (§5.6, §15.15). Nothing here ever puts a token, a key or a
+ * signature into a message.
+ */
+public final class Jwt {
+
+    static int32 dot(String t, int32 from) {
+        int32 i = from;
+        while (i < t.byteLength()) {
+            if (t.byteAt(i) == (int8) 46) { return i; }
+            i = i + 1;
+        }
+        return -1;
+    }
+
+    /** `s` as a JSON string literal, quotes included. */
+    public static #String quote(String s) {
+        int32 n = s.byteLength();
+        int8[] out = heap int8[(int64) n * 6L + 2L];
+        int32 o = 0;
+        out[o] = (int8) 34;
+        o = o + 1;
+        int32 i = 0;
+        while (i < n) {
+            int32 c = ((int32) s.byteAt(i)) & 0xff;
+            if (c == 34 || c == 92) {
+                out[o] = (int8) 92;
+                out[o + 1] = (int8) c;
+                o = o + 2;
+            } else if (c < 32) {
+                out[o] = (int8) 92;
+                out[o + 1] = (int8) 117;
+                out[o + 2] = (int8) 48;
+                out[o + 3] = (int8) 48;
+                out[o + 4] = (int8) Jwt.hexDigit(c >> 4);
+                out[o + 5] = (int8) Jwt.hexDigit(c & 15);
+                o = o + 6;
+            } else {
+                out[o] = (int8) c;
+                o = o + 1;
+            }
+            i = i + 1;
+        }
+        out[o] = (int8) 34;
+        o = o + 1;
+        return heap String(#out, o);
+    }
+
+    static int32 hexDigit(int32 v) {
+        if (v < 10) { return 48 + v; }
+        return 87 + v;
+    }
+
+    static int32 hexValue(int32 c) {
+        if (c >= 48 && c <= 57) { return c - 48; }
+        if (c >= 97 && c <= 102) { return c - 87; }
+        if (c >= 65 && c <= 70) { return c - 55; }
+        return -1;
+    }
+
+    static int32 hex4(int8[] b, int32 at) {
+        int32 v = 0;
+        int32 i = 0;
+        while (i < 4) {
+            int32 h = Jwt.hexValue(((int32) b[at + i]) & 0xff);
+            if (h < 0) { return -1; }
+            v = v * 16 + h;
+            i = i + 1;
+        }
+        return v;
+    }
+
+    static int32 putUtf8(int8[] out, int32 o, int32 cp) {
+        if (cp < 128) {
+            out[o] = (int8) cp;
+            return o + 1;
+        }
+        if (cp < 2048) {
+            out[o] = (int8) (192 | (cp >> 6));
+            out[o + 1] = (int8) (128 | (cp & 63));
+            return o + 2;
+        }
+        if (cp < 65536) {
+            out[o] = (int8) (224 | (cp >> 12));
+            out[o + 1] = (int8) (128 | ((cp >> 6) & 63));
+            out[o + 2] = (int8) (128 | (cp & 63));
+            return o + 3;
+        }
+        out[o] = (int8) (240 | (cp >> 18));
+        out[o + 1] = (int8) (128 | ((cp >> 12) & 63));
+        out[o + 2] = (int8) (128 | ((cp >> 6) & 63));
+        out[o + 3] = (int8) (128 | (cp & 63));
+        return o + 4;
+    }
+
+    /** A JSON string body's escapes decoded (the stdlib reader keeps them verbatim). */
+    static #String unescape(int8[] b, int32 len) {
+        int8[] out = heap int8[(int64) len + 1L];
+        int32 o = 0;
+        int32 i = 0;
+        while (i < len) {
+            int32 c = ((int32) b[i]) & 0xff;
+            if (c != 92 || i + 1 >= len) {
+                out[o] = (int8) c;
+                o = o + 1;
+                i = i + 1;
+            } else {
+                int32 e = ((int32) b[i + 1]) & 0xff;
+                i = i + 2;
+                if (e == 110) {
+                    out[o] = (int8) 10;
+                    o = o + 1;
+                } else if (e == 116) {
+                    out[o] = (int8) 9;
+                    o = o + 1;
+                } else if (e == 114) {
+                    out[o] = (int8) 13;
+                    o = o + 1;
+                } else if (e == 98) {
+                    out[o] = (int8) 8;
+                    o = o + 1;
+                } else if (e == 102) {
+                    out[o] = (int8) 12;
+                    o = o + 1;
+                } else if (e == 117 && i + 4 <= len) {
+                    int32 cp = Jwt.hex4(b, i);
+                    i = i + 4;
+                    if (cp >= 55296 && cp < 56320 && i + 6 <= len
+                            && b[i] == (int8) 92 && b[i + 1] == (int8) 117) {
+                        int32 lo = Jwt.hex4(b, i + 2);
+                        if (lo >= 56320 && lo < 57344) {
+                            cp = 65536 + ((cp - 55296) << 10) + (lo - 56320);
+                            i = i + 6;
+                        }
+                    }
+                    if (cp < 0 || (cp >= 55296 && cp < 57344)) { cp = 65533; }
+                    o = Jwt.putUtf8(out, o, cp);
+                } else {
+                    out[o] = (int8) e;
+                    o = o + 1;
+                }
+            }
+        }
+        return heap String(#out, o);
+    }
+
+    static #String segment(String text) {
+        int8[] b #= text.toBytes();
+        return Base64.encodeUrlSafe(b, (int64) text.byteLength());
+    }
+
+    /** `header.payload.signature` signed with HS256 under `key`, the header naming `kid`. */
+    public static #String encodeHs256(String kid, String payloadJson,
+                                      int8[] key, int64 keyLen) {
+        String header #= "{\"alg\":\"HS256\",\"typ\":\"JWT\",\"kid\":"
+            + Jwt.quote(kid) + "}";
+        String input #= Jwt.segment(header) + "." + Jwt.segment(payloadJson);
+        int8[] in #= input.toBytes();
+        int8[] mac #= HmacSha256.mac(key, keyLen, in,
+            (int64) input.byteLength());
+        String out #= input + "." + Base64.encodeUrlSafe(mac, 32L);
+        return #out;
+    }
+
+    static void malformed(String provider, String operation) {
+        throw heap IdentityException(IdentityException.INVALID_TOKEN(),
+            provider, operation, "-", "token failed the malformed check: "
+            + "not three base64url segments over JSON objects");
+    }
+
+    /**
+     * Split and decode without verifying anything; invalid-token naming
+     * the malformed check when it is not a compact JWT.
+     */
+    public static #DecodedJwt decode(String token, String provider,
+                                     String operation) {
+        int32 n = token.byteLength();
+        int32 a = Jwt.dot(token, 0);
+        int32 b = -1;
+        if (a > 0) { b = Jwt.dot(token, a + 1); }
+        if (a < 1 || b <= a + 1 || b + 1 >= n || Jwt.dot(token, b + 1) >= 0) {
+            Jwt.malformed(provider, operation);
+        }
+        DecodedJwt d = heap DecodedJwt();
+        try {
+            String hs #= token.substring(0, a);
+            int8[] h #= Base64.decode(hs);
+            JsonValue hv #= Json.parse(h, (int64) h.count());
+            String ps #= token.substring(a + 1, b);
+            int8[] p #= Base64.decode(ps);
+            JsonValue pv #= Json.parse(p, (int64) p.count());
+            String ss #= token.substring(b + 1, n);
+            int8[] sig #= Base64.decode(ss);
+            if (hv.kind() != JsonValue.OBJECT || pv.kind() != JsonValue.OBJECT) {
+                Jwt.malformed(provider, operation);
+            }
+            d.algName #= Jwt.member(hv, "alg");
+            d.keyId #= Jwt.member(hv, "kid");
+            d.body #= pv;
+            d.sig #= sig;
+            d.input #= token.substring(0, b);
+        } catch (Base64Exception e) {
+            Jwt.malformed(provider, operation);
+        } catch (JsonParseException e) {
+            Jwt.malformed(provider, operation);
+        }
+        return #d;
+    }
+
+    /** A string member of a JSON object, decoded, or "" when absent or not a string. */
+    static #String member(JsonValue obj, String name) {
+        JsonValue v = obj.object().get(name);
+        if (v == null || v.kind() != JsonValue.STRING) {
+            String none = "";
+            return #none;
+        }
+        return Jwt.unescape(v.asBytes(), v.asBytesLength());
+    }
+
+    /** A token reduced to its subject and expiry for a log (§5.7). */
+    public static #String redact(String token) {
+        try {
+            DecodedJwt d #= Jwt.decode(token, "jwt", "redact");
+            Claims c #= d.claims();
+            String out #= "jwt(sub=" + c.subject() + ", exp=" + c.expiresAt()
+                + ")";
+            return #out;
+        } catch (IdentityException e) {
+            String bad = "jwt(malformed)";
+            return #bad;
+        }
+        String never = "jwt(malformed)";
+        return #never;
+    }
+}

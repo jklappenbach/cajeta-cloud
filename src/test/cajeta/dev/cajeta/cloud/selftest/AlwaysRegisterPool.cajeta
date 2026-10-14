@@ -2,10 +2,13 @@ package dev.cajeta.cloud.selftest;
 
 import cajeta.lang.String;
 import dev.cajeta.cloud.Capabilities;
+import dev.cajeta.cloud.identity.Account;
 import dev.cajeta.cloud.identity.Attributes;
+import dev.cajeta.cloud.identity.Authenticator;
 import dev.cajeta.cloud.identity.MemoryIdentityHooks;
 import dev.cajeta.cloud.identity.MemoryUserPool;
 import dev.cajeta.cloud.identity.RegistrationResult;
+import dev.cajeta.cloud.identity.TokenVerifier;
 import dev.cajeta.cloud.identity.User;
 import dev.cajeta.cloud.identity.UserPool;
 
@@ -43,6 +46,13 @@ final class AlwaysRegisterPool implements UserPool {
         this.serial = this.serial + 1;
         return this.inner.registerWith(username + "#" + this.serial,
             password, attributes);
+    }
+
+    public #RegistrationResult registerPasswordless(String username,
+                                                    Attributes attributes) {
+        this.serial = this.serial + 1;
+        return this.inner.registerPasswordless(username + "#" + this.serial,
+            attributes);
     }
 
     public void confirm(String username, String code) {
@@ -85,4 +95,10 @@ final class AlwaysRegisterPool implements UserPool {
     public #String[] groups(String subject) {
         return this.inner.groups(subject);
     }
+
+    public Authenticator authenticator() { return this.inner.authenticator(); }
+
+    public Account account() { return this.inner.account(); }
+
+    public TokenVerifier verifier() { return this.inner.verifier(); }
 }

@@ -1,0 +1,78 @@
+package dev.cajeta.cloud.selftest;
+
+import cajeta.lang.String;
+import dev.cajeta.cloud.identity.Account;
+import dev.cajeta.cloud.identity.Attributes;
+import dev.cajeta.cloud.identity.Claims;
+import dev.cajeta.cloud.identity.DecodedJwt;
+import dev.cajeta.cloud.identity.IdentityException;
+import dev.cajeta.cloud.identity.Jwt;
+import dev.cajeta.cloud.identity.MemoryUserPool;
+import dev.cajeta.cloud.identity.TotpEnrollment;
+import dev.cajeta.cloud.identity.User;
+
+/** The self-service plane of a {@link LiarPool}. */
+final class LiarAccount implements Account {
+
+    MemoryUserPool pool;
+    int32 lie;
+
+    LiarAccount(MemoryUserPool pool, int32 lie) {
+        this.pool #= pool;
+        this.lie = lie;
+        return;
+    }
+
+    public #User me(String accessToken) {
+        if (this.lie != Lie.ACCOUNT()) {
+            return this.pool.account().me(accessToken);
+        }
+        try {
+            return this.pool.account().me(accessToken);
+        } catch (IdentityException e) {
+            DecodedJwt d #= Jwt.decode(accessToken, "memory", "me");
+            Claims c #= d.claims();
+            return this.pool.lookupBySubject(c.subject());
+        }
+        return this.pool.account().me(accessToken);
+    }
+
+    public void updateAttributes(String accessToken, Attributes attributes) {
+        this.pool.account().updateAttributes(accessToken, attributes);
+        return;
+    }
+
+    public void changePassword(String accessToken, String oldPassword,
+                               String newPassword) {
+        this.pool.account().changePassword(accessToken, oldPassword,
+            newPassword);
+        return;
+    }
+
+    public void deleteMe(String accessToken) {
+        this.pool.account().deleteMe(accessToken);
+        return;
+    }
+
+    public #TotpEnrollment enrollTotp(String accessToken) {
+        return this.pool.account().enrollTotp(accessToken);
+    }
+
+    public void activateTotp(String accessToken, String code) {
+        if (this.lie != Lie.ACCOUNT()) {
+            this.pool.account().activateTotp(accessToken, code);
+            return;
+        }
+        try {
+            this.pool.account().activateTotp(accessToken, code);
+        } catch (IdentityException e) {
+            return;
+        }
+        return;
+    }
+
+    public void signOutEverywhere(String accessToken) {
+        this.pool.account().signOutEverywhere(accessToken);
+        return;
+    }
+}

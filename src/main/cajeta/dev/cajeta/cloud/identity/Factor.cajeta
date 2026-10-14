@@ -1,0 +1,27 @@
+package dev.cajeta.cloud.identity;
+
+import cajeta.lang.String;
+
+/**
+ * The first factor a sign-in names (identity spec §15.3, §15.18).
+ * `signIn(username, password)` is PASSWORD; `signInWith` takes the rest.
+ */
+public final class Factor {
+
+    public static int32 PASSWORD()  { return 0; }
+    public static int32 EMAIL_OTP() { return 1; }
+    public static int32 SMS_OTP()   { return 2; }
+    public static int32 PASSKEY()   { return 3; }
+    public static int32 TOTP()      { return 4; }
+
+    /** The factor's name, for messages. */
+    public static #String name(int32 factor) {
+        String s = "UNKNOWN";
+        if (factor == 0) { s = "PASSWORD"; }
+        if (factor == 1) { s = "EMAIL_OTP"; }
+        if (factor == 2) { s = "SMS_OTP"; }
+        if (factor == 3) { s = "PASSKEY"; }
+        if (factor == 4) { s = "TOTP"; }
+        return #s;
+    }
+}

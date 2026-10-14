@@ -1,0 +1,115 @@
+package dev.cajeta.cloud.selftest;
+
+import cajeta.codec.Base64;
+import cajeta.codec.json.Json;
+import cajeta.codec.json.JsonArray;
+import cajeta.codec.json.JsonObject;
+import cajeta.codec.json.JsonValue;
+import cajeta.hash.HmacSha256;
+import cajeta.lang.String;
+
+/**
+ * A test-local HS256 check (identity plan 3.1.6, spec §10.4): it splits,
+ * decodes, signs and verifies with the stdlib alone, never through the
+ * port's codec or the driver's verifier, so a driver whose tokens only
+ * its own code accepts is caught.
+ */
+final class TestJwt {
+
+    static int32 dot(String t, int32 from) {
+        int32 i = from;
+        while (i < t.byteLength()) {
+            if (t.byteAt(i) == (int8) 46) { return i; }
+            i = i + 1;
+        }
+        return -1;
+    }
+
+    static #String text(int8[] b, int32 n) {
+        int8[] out = heap int8[(int64) n];
+        int32 i = 0;
+        while (i < n) { out[i] = b[i]; i = i + 1; }
+        String s = heap String(#out, n);
+        return #s;
+    }
+
+    static #String segment(String token, int32 index) {
+        int32 a = TestJwt.dot(token, 0);
+        int32 b = TestJwt.dot(token, a + 1);
+        int32 from = 0;
+        int32 to = a;
+        if (index == 1) { from = a + 1; to = b; }
+        if (index == 2) { from = b + 1; to = token.byteLength(); }
+        String seg #= token.substring(from, to);
+        return #seg;
+    }
+
+    /** A segment's decoded text. */
+    static #String decoded(String token, int32 index) {
+        String seg #= TestJwt.segment(token, index);
+        int8[] raw #= Base64.decode(seg);
+        return TestJwt.text(raw, (int32) raw.count());
+    }
+
+    static #String header(String token) { return TestJwt.decoded(token, 0); }
+
+    static #String payload(String token) { return TestJwt.decoded(token, 1); }
+
+    static #String sign(String headerJson, String payloadJson, int8[] key,
+                        int64 keyLen) {
+        int8[] h #= headerJson.toBytes();
+        int8[] p #= payloadJson.toBytes();
+        String hs #= Base64.encodeUrlSafe(h, (int64) headerJson.byteLength());
+        String ps #= Base64.encodeUrlSafe(p, (int64) payloadJson.byteLength());
+        String input #= hs + "." + ps;
+        int8[] in #= input.toBytes();
+        int8[] mac #= HmacSha256.mac(key, keyLen, in,
+            (int64) input.byteLength());
+        String sig #= Base64.encodeUrlSafe(mac, 32L);
+        String out #= input + "." + sig;
+        return #out;
+    }
+
+    static boolean verify(String token, int8[] key, int64 keyLen) {
+        int32 a = TestJwt.dot(token, 0);
+        if (a < 0) { return false; }
+        int32 b = TestJwt.dot(token, a + 1);
+        if (b < 0) { return false; }
+        String input #= token.substring(0, b);
+        String sig #= token.substring(b + 1, token.byteLength());
+        int8[] in #= input.toBytes();
+        int8[] mac #= HmacSha256.mac(key, keyLen, in,
+            (int64) input.byteLength());
+        String expect #= Base64.encodeUrlSafe(mac, 32L);
+        return expect.equals(sig);
+    }
+
+    /** Re-sign the token's header over its payload with one substring replaced. */
+    static #String forge(String token, String from, String to, int8[] key,
+                         int64 keyLen) {
+        String h #= TestJwt.header(token);
+        String p #= TestJwt.payload(token);
+        String p2 #= p.replace(from, to);
+        return TestJwt.sign(h, p2, key, keyLen);
+    }
+
+    /** A member of the JWKS's first key, read with the stdlib JSON parser. */
+    static #String jwksMember(String jwks, String name) {
+        JsonValue doc #= Json.parse(jwks);
+        JsonValue keysValue = doc.object().get("keys");
+        JsonArray keys = keysValue.array();
+        JsonValue first = keys.get(0);
+        JsonObject k0 = first.object();
+        JsonValue v = k0.get(name);
+        if (v == null) {
+            String none = "";
+            return #none;
+        }
+        return TestJwt.text(v.asBytes(), v.asBytesLength());
+    }
+
+    static #int8[] jwksKey(String jwks) {
+        String k #= TestJwt.jwksMember(jwks, "k");
+        return Base64.decode(k);
+    }
+}

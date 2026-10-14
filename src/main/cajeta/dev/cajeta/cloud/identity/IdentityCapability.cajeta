@@ -5,9 +5,9 @@ import cajeta.lang.String;
 /**
  * Identity capability names (identity spec §8.1), declared through
  * {@link dev.cajeta.cloud.Capabilities} like every other family.
- * The minimal cut implements CONFIRMATION, CUSTOM_ATTRIBUTES and
- * GROUPS; the rest are named here so adapters and the full cut share
- * one vocabulary.
+ * ADMIN, PASSWORD_RESET (§15.12), PASSWORDLESS and TOTP_SIGN_IN
+ * (§15.18) extend the §8.1 list. TOTP_SIGN_IN is the authenticator as
+ * the only factor, which Cognito does not offer.
  */
 public final class IdentityCapability {
 
@@ -22,4 +22,8 @@ public final class IdentityCapability {
     public static #String JWKS()              { String s = "identity.jwks";              return #s; }
     public static #String INTROSPECTION()     { String s = "identity.introspection";     return #s; }
     public static #String PASSKEYS()          { String s = "identity.passkeys";          return #s; }
+    public static #String ADMIN()             { String s = "identity.admin";             return #s; }
+    public static #String PASSWORD_RESET()    { String s = "identity.password-reset";    return #s; }
+    public static #String PASSWORDLESS()      { String s = "identity.passwordless";      return #s; }
+    public static #String TOTP_SIGN_IN()      { String s = "identity.totp-sign-in";      return #s; }
 }

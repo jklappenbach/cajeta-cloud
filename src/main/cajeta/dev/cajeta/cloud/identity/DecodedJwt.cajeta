@@ -1,0 +1,119 @@
+package dev.cajeta.cloud.identity;
+
+import cajeta.codec.json.JsonArray;
+import cajeta.codec.json.JsonObject;
+import cajeta.codec.json.JsonValue;
+import cajeta.collection.ArrayList;
+import cajeta.hash.Hash;
+import cajeta.hash.HmacSha256;
+import cajeta.lang.String;
+
+/**
+ * A compact JWT split and decoded but not yet trusted (identity plan
+ * 3.2.3): the header's algorithm and key id, the payload, and what the
+ * signature covers. A verifier checks the signature before it believes
+ * a single claim.
+ */
+public final class DecodedJwt {
+
+    String algName;
+    String keyId;
+    JsonValue body;
+    int8[] sig;
+    String input;
+
+    DecodedJwt() { return; }
+
+    /** The header's `alg`. */
+    public #String alg() {
+        String out = "" + this.algName;
+        return #out;
+    }
+
+    /** The header's `kid`, or "". */
+    public #String kid() {
+        String out = "" + this.keyId;
+        return #out;
+    }
+
+    /**
+     * Whether the signature is HS256 under `key`, compared in constant
+     * time. Any other algorithm answers false: RS256 and ES256 are
+     * refused by {@link #requireHs256} with the reason.
+     */
+    public boolean signedWithHs256(int8[] key, int64 keyLen) {
+        if (!this.algName.equals("HS256")) { return false; }
+        int8[] in #= this.input.toBytes();
+        int8[] mac #= HmacSha256.mac(key, keyLen, in,
+            (int64) this.input.byteLength());
+        return Hash.constantTimeEquals(mac, 32L, this.sig,
+            (int64) this.sig.count());
+    }
+
+    /**
+     * Refuse every algorithm but HS256. RS256 and ES256 are named as the
+     * stdlib gap they are (§5.6, §15.15), `none` and the rest as an
+     * algorithm a verifier must not accept.
+     */
+    public void requireHs256(String provider, String operation) {
+        if (this.algName.equals("HS256")) { return; }
+        if (this.algName.equals("RS256") || this.algName.equals("ES256")) {
+            throw heap IdentityException(
+                IdentityException.UNSUPPORTED_CAPABILITY(), provider,
+                operation, "-", this.algName + " verification needs RSA or "
+                + "ECDSA in the stdlib, which it does not have yet (identity "
+                + "spec §5.6, §15.15)");
+        }
+        throw heap IdentityException(IdentityException.INVALID_TOKEN(),
+            provider, operation, "-", "token failed the algorithm check: "
+            + "only HS256 is accepted");
+    }
+
+    /** The payload's claims, decoded (a fresh value each call). */
+    public #Claims claims() {
+        Attributes all = heap Attributes();
+        ArrayList<String> groups = heap ArrayList<String>();
+        int32 use = -1;
+        int64 exp = 0L;
+        int64 iat = 0L;
+        JsonObject o = this.body.object();
+        int32 i = 0;
+        while (i < o.count()) {
+            String name #= Jwt.unescape(o.keyAt(i), o.keyLenAt(i));
+            JsonValue v = o.valueAt(i);
+            int32 k = v.kind();
+            if (k == JsonValue.STRING) {
+                String text #= Jwt.unescape(v.asBytes(), v.asBytesLength());
+                all.set(name, text);
+            } else if (k == JsonValue.NUMBER) {
+                int64 num = v.asInt64();
+                String text #= "" + num;
+                all.set(name, text);
+                if (name.equals("exp")) { exp = num; }
+                if (name.equals("iat")) { iat = num; }
+            } else if (k == JsonValue.BOOLEAN) {
+                String text = "false";
+                if (v.asBoolean()) { text = "true"; }
+                all.set(name, text);
+            } else if (k == JsonValue.ARRAY && name.equals("groups")) {
+                JsonArray arr = v.array();
+                int32 j = 0;
+                while (j < arr.count()) {
+                    JsonValue g = arr.get(j);
+                    if (g.kind() == JsonValue.STRING) {
+                        String gs #= Jwt.unescape(g.asBytes(),
+                            g.asBytesLength());
+                        groups.add(#gs);
+                    }
+                    j = j + 1;
+                }
+            }
+            i = i + 1;
+        }
+        String tu #= all.get("token_use");
+        if (tu.equals("access")) { use = TokenUse.ACCESS(); }
+        if (tu.equals("id")) { use = TokenUse.ID(); }
+        Claims c = heap Claims(#all, #groups, use, exp, iat);
+        return #c;
+    }
+}

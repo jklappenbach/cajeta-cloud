@@ -1,0 +1,27 @@
+package dev.cajeta.cloud.identity;
+
+/**
+ * A clock that moves only when told (identity spec §6.5): codes expire,
+ * lockouts lift and TOTP steps turn exactly when a test says so.
+ */
+public final class ManualTimeSource implements TimeSource {
+
+    int64 now;
+
+    public ManualTimeSource(int64 startSeconds) {
+        this.now = startSeconds;
+        return;
+    }
+
+    public int64 nowSeconds() { return this.now; }
+
+    public void set(int64 seconds) {
+        this.now = seconds;
+        return;
+    }
+
+    public void advance(int64 seconds) {
+        this.now = this.now + seconds;
+        return;
+    }
+}

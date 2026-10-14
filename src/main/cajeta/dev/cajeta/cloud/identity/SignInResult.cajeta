@@ -1,0 +1,36 @@
+package dev.cajeta.cloud.identity;
+
+/**
+ * What sign-in and respond answer (identity spec §4.1, §6.2): tokens, or
+ * a challenge to answer next. The client loop is: while the result is a
+ * challenge, answer it with {@link Authenticator#respond}.
+ */
+public final class SignInResult {
+
+    Tokens tok;
+    Challenge ch;
+
+    SignInResult() { return; }
+
+    public static #SignInResult ofTokens(#Tokens tokens) {
+        SignInResult r = heap SignInResult();
+        r.tok #= tokens;
+        return #r;
+    }
+
+    public static #SignInResult ofChallenge(#Challenge challenge) {
+        SignInResult r = heap SignInResult();
+        r.ch #= challenge;
+        return #r;
+    }
+
+    public boolean isTokens() { return this.tok != null; }
+
+    public boolean isChallenge() { return this.ch != null; }
+
+    /** The tokens, a view; null when this is a challenge. */
+    public Tokens tokens() { return this.tok; }
+
+    /** The challenge, a view; null when this is tokens. */
+    public Challenge challenge() { return this.ch; }
+}

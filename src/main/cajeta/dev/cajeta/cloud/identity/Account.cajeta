@@ -1,0 +1,34 @@
+package dev.cajeta.cloud.identity;
+
+import cajeta.lang.String;
+
+/**
+ * The self-service plane (identity spec §15.1): every call is keyed by
+ * the caller's access token, so a request reads and changes its own user
+ * without server credentials. A revoked or expired token fails every
+ * call with invalid-token.
+ */
+public interface Account {
+
+    /** The caller's user. */
+    #User me(String accessToken);
+
+    /** Set each attribute whole (§7.2); needs CUSTOM_ATTRIBUTES. */
+    void updateAttributes(String accessToken, Attributes attributes);
+
+    /** Change the password; a wrong old password is invalid-credentials. */
+    void changePassword(String accessToken, String oldPassword,
+                        String newPassword);
+
+    /** Delete the caller's account and every session it holds. */
+    void deleteMe(String accessToken);
+
+    /** Begin TOTP enrollment: the secret, shown once (§15.6, §15.18.3). */
+    #TotpEnrollment enrollTotp(String accessToken);
+
+    /** Activate the enrollment with a first code from the authenticator (§6.3). */
+    void activateTotp(String accessToken, String code);
+
+    /** Invalidate every session of the caller (§15.8). */
+    void signOutEverywhere(String accessToken);
+}

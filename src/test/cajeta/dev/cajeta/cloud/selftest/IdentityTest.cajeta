@@ -60,8 +60,8 @@ public class IdentityTest {
         Assert.isTrue(c.supports(IdentityCapability.CONFIRMATION()));
         Assert.isTrue(c.supports(IdentityCapability.CUSTOM_ATTRIBUTES()));
         Assert.isTrue(c.supports(IdentityCapability.GROUPS()));
-        Assert.isFalse(c.supports(IdentityCapability.TOTP()));
-        Assert.isFalse(c.supports(IdentityCapability.JWKS()));
+        Assert.isTrue(c.supports(IdentityCapability.TOTP()));
+        Assert.isTrue(c.supports(IdentityCapability.JWKS()));
         Assert.isFalse(c.supports(IdentityCapability.PASSKEYS()));
         Assert.isTrue(c.adapterName().equals("memory"));
     }
@@ -73,7 +73,7 @@ public class IdentityTest {
         RegistrationResult r2 #= p.register("heidi", "correct horse battery");
         String rec1 #= p.hooks().passwordRecord(r1.subject());
         String rec2 #= p.hooks().passwordRecord(r2.subject());
-        Assert.isTrue(rec1.startsWith("sha256-salted$"));
+        Assert.isTrue(rec1.startsWith("pbkdf2-sha256$"));
         Assert.isFalse(rec1.contains("correct horse battery"));
         Assert.isFalse(rec1.equals(rec2));
     }

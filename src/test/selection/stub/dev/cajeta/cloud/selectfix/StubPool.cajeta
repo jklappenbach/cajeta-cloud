@@ -2,9 +2,12 @@ package dev.cajeta.cloud.selectfix;
 
 import cajeta.lang.String;
 import dev.cajeta.cloud.Capabilities;
+import dev.cajeta.cloud.identity.Account;
 import dev.cajeta.cloud.identity.Attributes;
+import dev.cajeta.cloud.identity.Authenticator;
 import dev.cajeta.cloud.identity.MemoryUserPool;
 import dev.cajeta.cloud.identity.RegistrationResult;
+import dev.cajeta.cloud.identity.TokenVerifier;
 import dev.cajeta.cloud.identity.User;
 import dev.cajeta.cloud.identity.UserPool;
 
@@ -29,6 +32,10 @@ public final class StubPool implements UserPool {
         return this.inner.registerWith(username, password, attributes);
     }
 
+    public #RegistrationResult registerPasswordless(String username, Attributes attributes) {
+        return this.inner.registerPasswordless(username, attributes);
+    }
+
     public void confirm(String username, String code) { this.inner.confirm(username, code); }
 
     public #User lookupBySubject(String subject) { return this.inner.lookupBySubject(subject); }
@@ -48,4 +55,10 @@ public final class StubPool implements UserPool {
     public void removeFromGroup(String subject, String group) { this.inner.removeFromGroup(subject, group); }
 
     public #String[] groups(String subject) { return this.inner.groups(subject); }
+
+    public Authenticator authenticator() { return this.inner.authenticator(); }
+
+    public Account account() { return this.inner.account(); }
+
+    public TokenVerifier verifier() { return this.inner.verifier(); }
 }

@@ -5,7 +5,9 @@ import dev.cajeta.cloud.Capabilities;
 
 /**
  * The user pool (identity spec §2.2, §3, §7): registration, confirmation,
- * lookup, deletion, attributes and groups. Inputs are copied (§2.3),
+ * lookup, deletion, attributes and groups. This is the administrative
+ * plane; the public plane, the self-service plane and the verifier are
+ * reached through it (§15.1), so selecting a pool selects all four. Inputs are copied (§2.3),
  * returns are owned (§2.4), and every operation is atomic under
  * concurrent use (§2.5). Failures are {@link IdentityException}.
  */
@@ -20,6 +22,10 @@ public interface UserPool {
     /** Create an account with custom attributes; needs CUSTOM_ATTRIBUTES (§7.1). */
     #RegistrationResult registerWith(String username, String password,
                                      Attributes attributes);
+
+    /** Create an account with no password, signed in only by a factor that is not PASSWORD; needs PASSWORDLESS (§15.18.1). */
+    #RegistrationResult registerPasswordless(String username,
+                                             Attributes attributes);
 
     /** Complete an unconfirmed account with the delivered code; keyed by username like every public-plane call (§3.3, §14.1). */
     void confirm(String username, String code);
@@ -47,4 +53,13 @@ public interface UserPool {
 
     /** The user's group names (§7.4). */
     #String[] groups(String subject);
+
+    /** The public plane over this pool: sign-in, challenges, refresh (§15.1). */
+    Authenticator authenticator();
+
+    /** The self-service plane, keyed by the caller's access token (§15.1). */
+    Account account();
+
+    /** Verification of the tokens this pool issues (§5.3). */
+    TokenVerifier verifier();
 }

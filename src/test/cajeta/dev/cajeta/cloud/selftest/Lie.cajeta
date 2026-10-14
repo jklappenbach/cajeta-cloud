@@ -1,0 +1,30 @@
+package dev.cajeta.cloud.selftest;
+
+/**
+ * What a {@link LiarPool} lies about (identity plan 3.3.2, spec §13.1):
+ * each is a driver that "always succeeds" at one thing, so the contract
+ * section covering it must fail.
+ */
+final class Lie {
+    static int32 NONE()            { return 0; }
+    /** A failed password sign-in answers tokens anyway. */
+    static int32 SIGNIN()          { return 1; }
+    /** A failed challenge answer answers tokens anyway. */
+    static int32 RESPOND()         { return 2; }
+    /** signOut revokes nothing. */
+    static int32 SIGNOUT_NOOP()    { return 3; }
+    /** The verifier believes any token it can decode. */
+    static int32 VERIFY()          { return 4; }
+    /** The Account plane serves any token that names a user. */
+    static int32 ACCOUNT()         { return 5; }
+    /** A wrong reset code resets the password anyway. */
+    static int32 RESET()           { return 6; }
+    /** A wrong password's error repeats the password. */
+    static int32 LEAKY()           { return 7; }
+    /** An unknown username answers user-not-found. */
+    static int32 UNKNOWN_DIFFERS() { return 8; }
+    /** The JWKS publishes a key the tokens were not signed with. */
+    static int32 JWKS()            { return 9; }
+    /** Only a wrong password is accepted: other refusals stand. */
+    static int32 WRONG_PASSWORD()  { return 10; }
+}

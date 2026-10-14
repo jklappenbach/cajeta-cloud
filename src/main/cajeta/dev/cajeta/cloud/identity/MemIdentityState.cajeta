@@ -1,35 +1,80 @@
 package dev.cajeta.cloud.identity;
 
+import cajeta.codec.Base32;
+import cajeta.codec.Base64;
+import cajeta.collection.ArrayList;
+import cajeta.collection.Collectors;
 import cajeta.collection.HashMap;
 import cajeta.concurrent.Lock;
+import cajeta.hash.SecureRandom;
+import cajeta.hash.Totp;
 import cajeta.lang.String;
+import dev.cajeta.cloud.Capabilities;
 
 /**
- * The memory driver's shared guts, held by both the pool and its hooks
- * so neither references the interface-implementing class (the MemState
- * pattern). One lock guards every operation (identity spec §2.5).
+ * The memory driver's shared guts, held by the pool, its hooks and its
+ * three planes so none references the interface-implementing class (the
+ * MemState pattern). One lock guards every operation (identity spec
+ * §2.5); every method below expects the caller to hold it.
+ *
+ * Tokens are HS256 JWTs under a key drawn from the CSPRNG when the pool
+ * is made (§5.5). A sign-in opens an origin, which its tokens carry as
+ * `origin_jti`: signing out ends the origin, so its refresh token and the
+ * Account plane stop accepting it, while the offline verifier keeps
+ * accepting its access token until it expires (§4.6).
  */
 final class MemIdentityState {
 
     Lock lock;
     HashMap<String, MemUser> bySubject;
     HashMap<String, String> subjectByName;
-    boolean confirmation;
-    boolean customAttributes;
-    boolean groups;
+    Capabilities caps;
+    TimeSource clock;
+    boolean totpRequired;
 
-    MemIdentityState(boolean confirmation, boolean customAttributes,
-                     boolean groups) {
+    int8[] key;
+    String kid;
+    String issuer;
+    String clientId;
+    HashMap<String, MemSession> sessions;
+    HashMap<String, MemRefresh> refreshByDigest;
+    HashMap<String, String> liveOrigins;
+
+    static int64 TOKEN_TTL()   { return 3600L; }
+    static int64 REFRESH_TTL() { return 2592000L; }
+    static int64 CODE_TTL()    { return 180L; }
+    static int64 RESET_TTL()   { return 3600L; }
+    static int32 LOCK_LIMIT()  { return 5; }
+
+    MemIdentityState(TimeSource clock) {
         this.lock = heap Lock();
         this.bySubject = heap HashMap<String, MemUser>();
         this.subjectByName = heap HashMap<String, String>();
-        this.confirmation = confirmation;
-        this.customAttributes = customAttributes;
-        this.groups = groups;
+        this.clock #= clock;
+        this.totpRequired = false;
+        this.key #= SecureRandom.bytes(32L);
+        this.kid #= MemCrypto.handle(6L);
+        this.issuer #= "memory://identity/" + MemCrypto.handle(6L);
+        this.clientId = "memory-client";
+        this.sessions = heap HashMap<String, MemSession>();
+        this.refreshByDigest = heap HashMap<String, MemRefresh>();
+        this.liveOrigins = heap HashMap<String, String>();
         return;
     }
 
-    /** Under the held lock: the user, or user-not-found. */
+    int64 now() { return this.clock.nowSeconds(); }
+
+    void requireCap(String capability, String operation, String subject) {
+        if (!this.caps.supports(capability)) {
+            throw heap IdentityException(
+                IdentityException.UNSUPPORTED_CAPABILITY(), "memory",
+                operation, subject, "capability '" + capability
+                + "' is not supported by adapter 'memory'");
+        }
+        return;
+    }
+
+    /** The user, or user-not-found. */
     MemUser find(String subject, String operation) {
         MemUser u = this.bySubject.get(subject);
         if (u == null) {
@@ -37,5 +82,673 @@ final class MemIdentityState {
                 "memory", operation, subject, "no such user");
         }
         return #= u;
+    }
+
+    /** The user by username, or null. */
+    MemUser byName(String username) {
+        String subject = this.subjectByName.get(username);
+        if (subject == null) { return null; }
+        MemUser u = this.bySubject.get(subject);
+        return #= u;
+    }
+
+    static void raise(int32 kind, String operation, String subject,
+                      String detail) {
+        throw heap IdentityException(kind, "memory", operation, subject,
+            detail);
+    }
+
+    /** One message for a wrong password and an unknown user (§4.2, §15.14). */
+    static void badCredentials(String username, String operation) {
+        MemIdentityState.raise(IdentityException.INVALID_CREDENTIALS(),
+            operation, username, "incorrect username or password");
+    }
+
+    // --- lockout (§4.4, §6.4, §15.18.8) --------------------------------
+
+    void ensureNotLocked(MemUser u, String operation) {
+        int64 now = this.now();
+        if (u.lockedUntil > now) {
+            IdentityException e #= IdentityException.locked("memory",
+                operation, u.username, u.lockedUntil - now);
+            throw e;
+        }
+        return;
+    }
+
+    /** Count a wrong password or code; from the limit on, lock with doubling backoff to 15 minutes. */
+    void fail(MemUser u) {
+        u.failures = u.failures + 1;
+        if (u.failures >= MemIdentityState.LOCK_LIMIT()) {
+            int64 back = 30L;
+            int32 k = u.failures - MemIdentityState.LOCK_LIMIT();
+            while (k > 0 && back < 900L) {
+                back = back * 2L;
+                k = k - 1;
+            }
+            if (back > 900L) { back = 900L; }
+            u.lockedUntil = this.now() + back;
+        }
+        return;
+    }
+
+    static void succeed(MemUser u) {
+        u.failures = 0;
+        u.lockedUntil = 0L;
+        return;
+    }
+
+    // --- tokens (§5) ----------------------------------------------------
+
+    static #String groupsJson(MemUser u) {
+        String s = "[";
+        int32 i = 0;
+        while (i < u.groups.count()) {
+            if (i > 0) { s #= s + ","; }
+            s #= s + Jwt.quote(u.groups.get(i));
+            i = i + 1;
+        }
+        s #= s + "]";
+        return #s;
+    }
+
+    #String payload(MemUser u, String origin, boolean access, int64 now,
+                    int64 exp, String jti) {
+        String s #= "{\"sub\":" + Jwt.quote(u.subject) + ",\"iss\":"
+            + Jwt.quote(this.issuer);
+        if (access) {
+            s #= s + ",\"client_id\":" + Jwt.quote(this.clientId)
+                + ",\"token_use\":\"access\",\"scope\":\"openid profile\"";
+        } else {
+            s #= s + ",\"aud\":" + Jwt.quote(this.clientId)
+                + ",\"token_use\":\"id\"";
+        }
+        s #= s + ",\"username\":" + Jwt.quote(u.username) + ",\"groups\":"
+            + MemIdentityState.groupsJson(u);
+        if (!access) {
+            int32 i = 0;
+            while (i < u.attrs.count()) {
+                String name #= u.attrs.nameAt(i);
+                String value #= u.attrs.valueAt(i);
+                s #= s + "," + Jwt.quote("custom:" + name) + ":"
+                    + Jwt.quote(value);
+                i = i + 1;
+            }
+        }
+        s #= s + ",\"origin_jti\":" + Jwt.quote(origin) + ",\"jti\":"
+            + Jwt.quote(jti) + ",\"auth_time\":" + now + ",\"iat\":" + now
+            + ",\"exp\":" + exp + "}";
+        return #s;
+    }
+
+    /** Access and id tokens for an origin, plus a refresh token when asked and REFRESH is declared. */
+    #Tokens issue(MemUser u, String origin, boolean withRefresh) {
+        int64 now = this.now();
+        int64 exp = now + MemIdentityState.TOKEN_TTL();
+        String ja #= MemCrypto.handle(12L);
+        String ji #= MemCrypto.handle(12L);
+        String ap #= this.payload(u, origin, true, now, exp, ja);
+        String ip #= this.payload(u, origin, false, now, exp, ji);
+        String access #= Jwt.encodeHs256(this.kid, ap, this.key, 32L);
+        String idt #= Jwt.encodeHs256(this.kid, ip, this.key, 32L);
+        String rt = "";
+        int64 rexp = 0L;
+        if (withRefresh && this.caps.supports(IdentityCapability.REFRESH())) {
+            rt #= MemCrypto.handle(32L);
+            rexp = now + MemIdentityState.REFRESH_TTL();
+            String digest #= MemCrypto.digestKey(rt);
+            this.refreshByDigest.put(#digest,
+                heap MemRefresh(u.subject, origin, rexp));
+        }
+        Tokens t = heap Tokens(access, idt, rt, exp, exp, rexp, u.subject);
+        return #t;
+    }
+
+    /** A completed sign-in: a new origin and its tokens. */
+    #SignInResult signedIn(MemUser u) {
+        String origin #= MemCrypto.handle(16L);
+        String ok = "" + origin;
+        String ov = "" + u.subject;
+        this.liveOrigins.put(#ok, #ov);
+        Tokens t #= this.issue(u, origin, true);
+        return SignInResult.ofTokens(#t);
+    }
+
+    static void badToken(String operation, String subject, String check) {
+        MemIdentityState.raise(IdentityException.INVALID_TOKEN(), operation,
+            subject, "token failed the " + check + " check");
+    }
+
+    /** Offline verification (§5.3, §15.10): signature, issuer, audience, expiry, use. */
+    #Claims verify(String token, int32 use, String operation) {
+        DecodedJwt d #= Jwt.decode(token, "memory", operation);
+        d.requireHs256("memory", operation);
+        if (!d.kid().equals(this.kid) || !d.signedWithHs256(this.key, 32L)) {
+            MemIdentityState.badToken(operation, "-", "signature");
+        }
+        Claims c #= d.claims();
+        String sub #= c.subject();
+        if (!c.issuer().equals(this.issuer)) {
+            MemIdentityState.badToken(operation, sub, "issuer");
+        }
+        if (!c.audience().equals(this.clientId)) {
+            MemIdentityState.badToken(operation, sub, "audience");
+        }
+        if (c.expiresAt() <= this.now()) {
+            MemIdentityState.badToken(operation, sub, "expiry");
+        }
+        if (c.tokenUse() != use) {
+            MemIdentityState.badToken(operation, sub, "use");
+        }
+        return #c;
+    }
+
+    #Jwks jwks() {
+        this.requireCap(IdentityCapability.JWKS(), "jwks", "-");
+        String k #= Base64.encodeUrlSafe(this.key, 32L);
+        String doc #= "{\"keys\":[{\"kty\":\"oct\",\"use\":\"sig\","
+            + "\"alg\":\"HS256\",\"kid\":" + Jwt.quote(this.kid) + ",\"k\":"
+            + Jwt.quote(k) + "}]}";
+        Jwks out = heap Jwks(doc);
+        return #out;
+    }
+
+    /** End every origin and refresh token of a user (§15.8). */
+    void revokeAll(String subject) {
+        ArrayList<String> origins #= this.liveOrigins.keys()
+            .collect(Collectors.toList<String>());
+        ArrayList<String> doomed = heap ArrayList<String>();
+        int32 i = 0;
+        while (i < origins.count()) {
+            String o = origins.get(i);
+            String owner = this.liveOrigins.get(o);
+            if (owner != null && owner.equals(subject)) {
+                String c = "" + o;
+                doomed.add(#c);
+            }
+            i = i + 1;
+        }
+        ArrayList<String> digests #= this.refreshByDigest.keys()
+            .collect(Collectors.toList<String>());
+        ArrayList<String> doomedRefresh = heap ArrayList<String>();
+        i = 0;
+        while (i < digests.count()) {
+            String dg = digests.get(i);
+            MemRefresh r = this.refreshByDigest.get(dg);
+            if (r != null && r.subject.equals(subject)) {
+                String c = "" + dg;
+                doomedRefresh.add(#c);
+            }
+            i = i + 1;
+        }
+        i = 0;
+        while (i < doomed.count()) {
+            String gone #= this.liveOrigins.remove(doomed.get(i));
+            i = i + 1;
+        }
+        i = 0;
+        while (i < doomedRefresh.count()) {
+            MemRefresh gone #= this.refreshByDigest.remove(doomedRefresh.get(i));
+            i = i + 1;
+        }
+        return;
+    }
+
+    // --- sessions and challenges (§6) -------------------------------------
+
+    #String openSession(String subject, int32 kind, #String code) {
+        String h #= MemCrypto.handle(24L);
+        String hk = "" + h;
+        this.sessions.put(#hk, heap MemSession(subject, kind, #code,
+            this.now() + MemIdentityState.CODE_TTL()));
+        return #h;
+    }
+
+    static #SignInResult challenge(int32 kind, String session,
+                                   #Attributes params) {
+        Challenge c = heap Challenge(kind, session, #params);
+        return SignInResult.ofChallenge(#c);
+    }
+
+    /** `i***@e***.com`, or "" when there is no address. */
+    static #String maskEmail(String email) {
+        int64 at = email.indexOf("@");
+        if (at < 1L) {
+            String none = "";
+            return #none;
+        }
+        String first #= email.substring(0, 1);
+        String domain #= email.substring((int32) at + 1, email.byteLength());
+        String d0 #= domain.substring(0, 1);
+        int32 dot = -1;
+        int32 i = 0;
+        while (i < domain.byteLength()) {
+            if (domain.byteAt(i) == (int8) 46) { dot = i; }
+            i = i + 1;
+        }
+        String tld = "";
+        if (dot > 0) { tld #= domain.substring(dot, domain.byteLength()); }
+        String out #= first + "***@" + d0 + "***" + tld;
+        return #out;
+    }
+
+    /** `+*******0123`: the last four digits only. */
+    static #String maskPhone(String phone) {
+        int32 n = phone.byteLength();
+        if (n < 5) {
+            String none = "";
+            return #none;
+        }
+        String out = "+";
+        int32 i = 1;
+        while (i < n - 4) {
+            out #= out + "*";
+            i = i + 1;
+        }
+        out #= out + phone.substring(n - 4, n);
+        return #out;
+    }
+
+    #TotpEnrollment enrollment(MemUser u, int8[] secret, String session) {
+        String b32 #= Base32.encode(secret, 20L, false);
+        String uri #= Totp.uri("cajeta-memory", u.username, secret, 20L);
+        TotpEnrollment e = heap TotpEnrollment(b32, uri, session);
+        return #e;
+    }
+
+    // --- the public plane (§4, §6, §15.3, §15.9, §15.18) -------------------
+
+    #SignInResult signIn(String username, String password) {
+        String op = "signIn";
+        MemUser u = this.byName(username);
+        if (u == null) {
+            MemCrypto.burn(password);
+            MemIdentityState.badCredentials(username, op);
+        }
+        this.ensureNotLocked(u, op);
+        if (u.passwordRecord.byteLength() == 0) {
+            MemCrypto.burn(password);
+            this.fail(u);
+            MemIdentityState.badCredentials(username, op);
+        }
+        if (!MemCrypto.matches(u.passwordRecord, password)) {
+            this.fail(u);
+            MemIdentityState.badCredentials(username, op);
+        }
+        if (!u.confirmed) {
+            MemIdentityState.raise(IdentityException.NOT_CONFIRMED(), op,
+                username, "the account is not confirmed");
+        }
+        if (u.resetRequired) {
+            MemIdentityState.raise(IdentityException.PASSWORD_RESET_REQUIRED(),
+                op, username, "the account must reset its password before "
+                + "it signs in");
+        }
+        MemIdentityState.succeed(u);
+        if (!MemCrypto.isCurrent(u.passwordRecord)) {
+            u.passwordRecord #= MemCrypto.passwordRecord(password);
+        }
+        if (u.totpActive) {
+            String none = "";
+            String h #= this.openSession(u.subject, ChallengeKind.TOTP(),
+                #none);
+            Attributes params = heap Attributes();
+            return MemIdentityState.challenge(ChallengeKind.TOTP(), h,
+                #params);
+        }
+        if (this.totpRequired
+                && this.caps.supports(IdentityCapability.TOTP())) {
+            String none = "";
+            String h #= this.openSession(u.subject,
+                ChallengeKind.MFA_SETUP(), #none);
+            Attributes params = heap Attributes();
+            params.set("factors", "TOTP");
+            return MemIdentityState.challenge(ChallengeKind.MFA_SETUP(), h,
+                #params);
+        }
+        return this.signedIn(u);
+    }
+
+    #SignInResult signInWith(String username, int32 factor) {
+        String op = "signInWith";
+        if (factor == Factor.PASSWORD()) {
+            MemIdentityState.raise(IdentityException.POLICY_VIOLATION(), op,
+                username, "the PASSWORD factor takes a password: call "
+                + "signIn(username, password)");
+        }
+        if (factor == Factor.PASSKEY()) {
+            this.requireCap(IdentityCapability.PASSKEYS(), op, username);
+        }
+        int32 kind = -1;
+        String attr = "";
+        String medium = "";
+        if (factor == Factor.EMAIL_OTP()) {
+            this.requireCap(IdentityCapability.EMAIL_OTP(), op, username);
+            kind = ChallengeKind.EMAIL_OTP();
+            attr = "email";
+            medium = "EMAIL";
+        } else if (factor == Factor.SMS_OTP()) {
+            this.requireCap(IdentityCapability.SMS_OTP(), op, username);
+            kind = ChallengeKind.SMS_OTP();
+            attr = "phone_number";
+            medium = "SMS";
+        } else if (factor == Factor.TOTP()) {
+            this.requireCap(IdentityCapability.TOTP_SIGN_IN(), op, username);
+            kind = ChallengeKind.TOTP();
+        } else {
+            MemIdentityState.raise(IdentityException.POLICY_VIOLATION(), op,
+                username, "unknown factor " + factor);
+        }
+        MemUser u = this.byName(username);
+        String subject = "";
+        if (u != null) {
+            this.ensureNotLocked(u, op);
+            subject #= "" + u.subject;
+        }
+        Attributes params = heap Attributes();
+        String code = "";
+        if (kind != ChallengeKind.TOTP()) {
+            code #= MemCrypto.sixDigits();
+            String dest = "";
+            if (u != null) {
+                u.lastOtp #= "" + code;
+                String raw #= u.attrs.get(attr);
+                if (kind == ChallengeKind.EMAIL_OTP()) {
+                    dest #= MemIdentityState.maskEmail(raw);
+                } else {
+                    dest #= MemIdentityState.maskPhone(raw);
+                }
+            }
+            params.set("destination", dest);
+            params.set("medium", medium);
+        }
+        String h #= this.openSession(subject, kind, #code);
+        return MemIdentityState.challenge(kind, h, #params);
+    }
+
+    #SignInResult respond(String session, int32 kind, ChallengeAnswer answer) {
+        String op = "respond";
+        MemSession s = this.sessions.get(session);
+        if (s == null) {
+            MemIdentityState.raise(IdentityException.INVALID_CODE(), op, "-",
+                "the session is unknown or already answered");
+        }
+        if (s.kind != kind) {
+            MemIdentityState.raise(IdentityException.POLICY_VIOLATION(), op,
+                "-", "the session answers " + ChallengeKind.name(s.kind)
+                + ", not " + ChallengeKind.name(kind));
+        }
+        MemUser u = null;
+        String who = "-";
+        if (s.subject.byteLength() > 0) {
+            u = this.bySubject.get(s.subject);
+        }
+        if (u != null) {
+            who #= "" + u.username;
+            this.ensureNotLocked(u, op);
+        }
+        int64 now = this.now();
+        if (now > s.expiresAt) {
+            MemSession lapsed #= this.sessions.remove(session);
+            MemIdentityState.raise(IdentityException.CODE_EXPIRED(), op, who,
+                "the code has expired");
+        }
+        String code #= answer.value();
+        boolean ok = false;
+        if (kind == ChallengeKind.EMAIL_OTP() || kind == ChallengeKind.SMS_OTP()) {
+            ok = u != null && MemCrypto.sameText(code, s.code);
+        } else if (kind == ChallengeKind.TOTP()) {
+            this.requireCap(IdentityCapability.TOTP(), op, who);
+            if (u != null && u.totpActive) {
+                int64 step = MemCrypto.totpStep(u.totp, 20L, code, now,
+                    u.totpLastStep);
+                if (step >= 0L) {
+                    u.totpLastStep = step;
+                    ok = true;
+                }
+            }
+        } else if (kind == ChallengeKind.MFA_SETUP()) {
+            this.requireCap(IdentityCapability.TOTP(), op, who);
+            if (u != null && s.pending != null) {
+                int64 step = MemCrypto.totpStep(s.pending, 20L, code, now, -1L);
+                if (step >= 0L) {
+                    u.totp #= MemCrypto.copy(s.pending, 20L);
+                    u.totpActive = true;
+                    u.totpLastStep = step;
+                    ok = true;
+                }
+            }
+        } else {
+            MemIdentityState.raise(IdentityException.POLICY_VIOLATION(), op,
+                who, "the memory driver issues no " + ChallengeKind.name(kind)
+                + " challenge");
+        }
+        if (!ok) {
+            if (u != null) { this.fail(u); }
+            MemIdentityState.raise(IdentityException.INVALID_CODE(), op, who,
+                "the code does not match");
+        }
+        MemSession done #= this.sessions.remove(session);
+        MemIdentityState.succeed(u);
+        if (!u.confirmed) {
+            MemIdentityState.raise(IdentityException.NOT_CONFIRMED(), op, who,
+                "the account is not confirmed");
+        }
+        return this.signedIn(u);
+    }
+
+    #Tokens refresh(String refreshToken) {
+        String op = "refresh";
+        this.requireCap(IdentityCapability.REFRESH(), op, "-");
+        String digest #= MemCrypto.digestKey(refreshToken);
+        MemRefresh r = this.refreshByDigest.get(digest);
+        if (r == null) {
+            MemIdentityState.badToken(op, "-", "revocation");
+        }
+        if (this.now() >= r.expiresAt) {
+            MemRefresh lapsed #= this.refreshByDigest.remove(digest);
+            MemIdentityState.badToken(op, "-", "expiry");
+        }
+        if (!this.liveOrigins.containsKey(r.origin)) {
+            MemIdentityState.badToken(op, "-", "revocation");
+        }
+        MemUser u = this.bySubject.get(r.subject);
+        if (u == null) {
+            MemIdentityState.badToken(op, "-", "user");
+        }
+        String origin = "" + r.origin;
+        return this.issue(u, origin, false);
+    }
+
+    void signOut(String refreshToken) {
+        this.requireCap(IdentityCapability.REVOCATION(), "signOut", "-");
+        String digest #= MemCrypto.digestKey(refreshToken);
+        MemRefresh r = this.refreshByDigest.get(digest);
+        if (r == null) { return; }
+        String origin = "" + r.origin;
+        MemRefresh gone #= this.refreshByDigest.remove(digest);
+        if (this.liveOrigins.containsKey(origin)) {
+            String o #= this.liveOrigins.remove(origin);
+        }
+        return;
+    }
+
+    void forgotPassword(String username) {
+        this.requireCap(IdentityCapability.PASSWORD_RESET(), "forgotPassword",
+            username);
+        MemUser u = this.byName(username);
+        if (u == null) { return; }
+        u.resetCode #= MemCrypto.sixDigits();
+        u.resetExpires = this.now() + MemIdentityState.RESET_TTL();
+        return;
+    }
+
+    void confirmForgotPassword(String username, String code,
+                               String newPassword) {
+        String op = "confirmForgotPassword";
+        this.requireCap(IdentityCapability.PASSWORD_RESET(), op, username);
+        if (newPassword.byteLength() < 8) {
+            MemIdentityState.raise(IdentityException.POLICY_VIOLATION(), op,
+                username, "password must be at least 8 bytes");
+        }
+        MemUser u = this.byName(username);
+        if (u == null) {
+            MemIdentityState.raise(IdentityException.INVALID_CODE(), op,
+                username, "the code does not match");
+        }
+        this.ensureNotLocked(u, op);
+        if (u.resetCode.byteLength() > 0 && this.now() > u.resetExpires) {
+            u.resetCode = "";
+            MemIdentityState.raise(IdentityException.CODE_EXPIRED(), op,
+                username, "the code has expired");
+        }
+        if (u.resetCode.byteLength() == 0
+                || !MemCrypto.sameText(code, u.resetCode)) {
+            this.fail(u);
+            MemIdentityState.raise(IdentityException.INVALID_CODE(), op,
+                username, "the code does not match");
+        }
+        u.passwordRecord #= MemCrypto.passwordRecord(newPassword);
+        u.resetCode = "";
+        u.resetRequired = false;
+        MemIdentityState.succeed(u);
+        this.revokeAll(u.subject);
+        return;
+    }
+
+    #TotpEnrollment enrollTotpForChallenge(String session) {
+        String op = "enrollTotpForChallenge";
+        this.requireCap(IdentityCapability.TOTP(), op, "-");
+        MemSession s = this.sessions.get(session);
+        if (s == null) {
+            MemIdentityState.raise(IdentityException.INVALID_CODE(), op, "-",
+                "the session is unknown or already answered");
+        }
+        if (s.kind != ChallengeKind.MFA_SETUP()) {
+            MemIdentityState.raise(IdentityException.POLICY_VIOLATION(), op,
+                "-", "the session answers " + ChallengeKind.name(s.kind)
+                + ", not MFA_SETUP");
+        }
+        if (this.now() > s.expiresAt) {
+            MemIdentityState.raise(IdentityException.CODE_EXPIRED(), op, "-",
+                "the session has expired");
+        }
+        MemUser u = this.bySubject.get(s.subject);
+        if (u == null) {
+            MemIdentityState.raise(IdentityException.INVALID_CODE(), op, "-",
+                "the session is unknown or already answered");
+        }
+        s.pending #= SecureRandom.bytes(20L);
+        return this.enrollment(u, s.pending, session);
+    }
+
+    // --- the self-service plane (§15.1) ------------------------------------
+
+    /** The caller of an Account call: a verified access token whose sign-in is still live. */
+    MemUser caller(String accessToken, String operation) {
+        Claims c #= this.verify(accessToken, TokenUse.ACCESS(), operation);
+        String sub #= c.subject();
+        String origin #= c.claim("origin_jti");
+        if (!this.liveOrigins.containsKey(origin)) {
+            MemIdentityState.badToken(operation, sub, "revocation");
+        }
+        MemUser u = this.bySubject.get(sub);
+        if (u == null) {
+            MemIdentityState.badToken(operation, sub, "user");
+        }
+        return #= u;
+    }
+
+    #User me(String accessToken) {
+        MemUser u = this.caller(accessToken, "me");
+        return MemoryUserPool.snapshot(u);
+    }
+
+    void updateAttributes(String accessToken, Attributes attributes) {
+        String op = "updateAttributes";
+        MemUser u = this.caller(accessToken, op);
+        this.requireCap(IdentityCapability.CUSTOM_ATTRIBUTES(), op, u.subject);
+        int32 i = 0;
+        while (i < attributes.count()) {
+            MemoryUserPool.checkName(attributes.nameAt(i), op, u.subject);
+            i = i + 1;
+        }
+        i = 0;
+        while (i < attributes.count()) {
+            u.attrs.set(attributes.nameAt(i), attributes.valueAt(i));
+            i = i + 1;
+        }
+        return;
+    }
+
+    void changePassword(String accessToken, String oldPassword,
+                        String newPassword) {
+        String op = "changePassword";
+        MemUser u = this.caller(accessToken, op);
+        this.ensureNotLocked(u, op);
+        if (!MemCrypto.matches(u.passwordRecord, oldPassword)) {
+            this.fail(u);
+            MemIdentityState.badCredentials(u.username, op);
+        }
+        if (newPassword.byteLength() < 8) {
+            MemIdentityState.raise(IdentityException.POLICY_VIOLATION(), op,
+                u.username, "password must be at least 8 bytes");
+        }
+        u.passwordRecord #= MemCrypto.passwordRecord(newPassword);
+        return;
+    }
+
+    void deleteMe(String accessToken) {
+        MemUser u = this.caller(accessToken, "deleteMe");
+        String subject = "" + u.subject;
+        String name = "" + u.username;
+        this.revokeAll(subject);
+        String droppedId #= this.subjectByName.remove(name);
+        MemUser dropped #= this.bySubject.remove(subject);
+        return;
+    }
+
+    #TotpEnrollment enrollTotp(String accessToken) {
+        String op = "enrollTotp";
+        MemUser u = this.caller(accessToken, op);
+        this.requireCap(IdentityCapability.TOTP(), op, u.username);
+        if (!u.confirmed) {
+            MemIdentityState.raise(IdentityException.NOT_CONFIRMED(), op,
+                u.username, "enrollment needs a confirmed account");
+        }
+        u.totpPending #= SecureRandom.bytes(20L);
+        return this.enrollment(u, u.totpPending, "");
+    }
+
+    void activateTotp(String accessToken, String code) {
+        String op = "activateTotp";
+        MemUser u = this.caller(accessToken, op);
+        this.requireCap(IdentityCapability.TOTP(), op, u.username);
+        this.ensureNotLocked(u, op);
+        if (u.totpPending == null) {
+            MemIdentityState.raise(IdentityException.POLICY_VIOLATION(), op,
+                u.username, "no TOTP enrollment is pending");
+        }
+        int64 step = MemCrypto.totpStep(u.totpPending, 20L, code, this.now(),
+            -1L);
+        if (step < 0L) {
+            this.fail(u);
+            MemIdentityState.raise(IdentityException.INVALID_CODE(), op,
+                u.username, "the code does not match");
+        }
+        u.totp #= MemCrypto.copy(u.totpPending, 20L);
+        u.totpActive = true;
+        u.totpLastStep = step;
+        MemIdentityState.succeed(u);
+        return;
+    }
+
+    void signOutEverywhere(String accessToken) {
+        String op = "signOutEverywhere";
+        MemUser u = this.caller(accessToken, op);
+        this.requireCap(IdentityCapability.REVOCATION(), op, u.username);
+        String subject = "" + u.subject;
+        this.revokeAll(subject);
+        return;
     }
 }

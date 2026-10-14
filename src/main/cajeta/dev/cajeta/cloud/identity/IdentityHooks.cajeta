@@ -11,4 +11,10 @@ public interface IdentityHooks {
 
     /** The last confirmation code delivered to the user, or user-not-found. */
     #String lastConfirmationCode(String subject);
+
+    /** The last EMAIL_OTP or SMS_OTP sign-in code delivered (§6.5), or "" when none. */
+    #String lastSignInCode(String subject);
+
+    /** The last password-reset code delivered (§15.9), or "" when none. */
+    #String lastPasswordResetCode(String subject);
 }

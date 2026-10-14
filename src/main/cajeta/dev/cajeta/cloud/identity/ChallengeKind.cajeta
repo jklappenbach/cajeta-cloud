@@ -1,0 +1,30 @@
+package dev.cajeta.cloud.identity;
+
+import cajeta.lang.String;
+
+/** What a challenge asks for (identity spec §6.1 as amended by §15.4). */
+public final class ChallengeKind {
+
+    public static int32 TOTP()                  { return 0; }
+    public static int32 SMS_OTP()               { return 1; }
+    public static int32 EMAIL_OTP()             { return 2; }
+    public static int32 NEW_PASSWORD_REQUIRED() { return 3; }
+    public static int32 MFA_SETUP()             { return 4; }
+    public static int32 SELECT_FACTOR()         { return 5; }
+    public static int32 CUSTOM()                { return 6; }
+    public static int32 PASSKEY()               { return 7; }
+
+    /** The kind's name, for messages. */
+    public static #String name(int32 kind) {
+        String s = "UNKNOWN";
+        if (kind == 0) { s = "TOTP"; }
+        if (kind == 1) { s = "SMS_OTP"; }
+        if (kind == 2) { s = "EMAIL_OTP"; }
+        if (kind == 3) { s = "NEW_PASSWORD_REQUIRED"; }
+        if (kind == 4) { s = "MFA_SETUP"; }
+        if (kind == 5) { s = "SELECT_FACTOR"; }
+        if (kind == 6) { s = "CUSTOM"; }
+        if (kind == 7) { s = "PASSKEY"; }
+        return #s;
+    }
+}

@@ -5,10 +5,13 @@ import dev.cajeta.cloud.Caps;
 import dev.cajeta.cloud.CloudException;
 import dev.cajeta.cloud.Credentials;
 import dev.cajeta.cloud.RetryPolicy;
+import dev.cajeta.cloud.identity.Claims;
 import dev.cajeta.cloud.identity.IdentityCapability;
 import dev.cajeta.cloud.identity.IdentityException;
 import dev.cajeta.cloud.identity.MemoryUserPool;
 import dev.cajeta.cloud.identity.RegistrationResult;
+import dev.cajeta.cloud.identity.SignInResult;
+import dev.cajeta.cloud.identity.TokenUse;
 import dev.cajeta.cloud.identity.User;
 import dev.cajeta.cloud.object.CondResult;
 import dev.cajeta.cloud.object.ListPage;
@@ -193,8 +196,24 @@ public final class Tour {
         Tour.check(kind == IdentityException.USER_EXISTS(),
             "a taken username conflicts, it never silently succeeds");
         Tour.check(pool.hooks().passwordRecord(r.subject())
-            .startsWith("sha256-salted$"),
-            "the memory driver stores a salted, tagged hash, never the password");
+            .startsWith("pbkdf2-sha256$"),
+            "the memory driver stores a PBKDF2 hash under a format tag, never the password");
+        SignInResult signed #= pool.authenticator().signIn("ada",
+            "correct horse battery");
+        Claims claims #= pool.verifier().verify(
+            signed.tokens().accessToken(), TokenUse.ACCESS());
+        Tour.check(signed.isTokens() && claims.subject().equals(r.subject())
+            && claims.inGroup("editors"),
+            "sign-in answers tokens whose verified claims carry the subject and groups");
+        int32 wrong = -1;
+        try {
+            SignInResult never #= pool.authenticator().signIn("ada",
+                "not the passphrase");
+        } catch (IdentityException e) {
+            wrong = e.kind();
+        }
+        Tour.check(wrong == IdentityException.INVALID_CREDENTIALS(),
+            "a wrong password is invalid-credentials, as an unknown user is");
         Tour.check(pool.capabilities().supports(
             IdentityCapability.CONFIRMATION()),
             "identity capabilities are declared like every other family");

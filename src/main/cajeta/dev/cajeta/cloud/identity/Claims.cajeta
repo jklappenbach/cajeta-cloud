@@ -1,0 +1,89 @@
+package dev.cajeta.cloud.identity;
+
+import cajeta.collection.ArrayList;
+import cajeta.lang.String;
+
+/**
+ * A verified token's claims (identity spec §5.2, §15.10). Every claim
+ * with a string, number or boolean value is kept by name, so
+ * {@link #claim} reaches anything the provider adds. Custom attributes
+ * come back bare: a provider prefix such as `custom:` is stripped
+ * (§15.11).
+ */
+public final class Claims {
+
+    Attributes all;
+    ArrayList<String> groupNames;
+    int32 use;
+    int64 exp;
+    int64 iat;
+
+    public Claims(#Attributes claims, #ArrayList<String> groups,
+                  int32 tokenUse, int64 expiresAt, int64 issuedAt) {
+        this.all #= claims;
+        this.groupNames #= groups;
+        this.use = tokenUse;
+        this.exp = expiresAt;
+        this.iat = issuedAt;
+        return;
+    }
+
+    public #String subject() { return this.all.get("sub"); }
+
+    public #String issuer() { return this.all.get("iss"); }
+
+    /** An id token's `aud`, or an access token's `client_id`. */
+    public #String audience() {
+        if (this.all.has("aud")) { return this.all.get("aud"); }
+        return this.all.get("client_id");
+    }
+
+    /** A {@link TokenUse} value, or -1 when the token names none. */
+    public int32 tokenUse() { return this.use; }
+
+    public #String username() { return this.all.get("username"); }
+
+    /** The `scope` claim (`scope` is a reserved word in cajeta). */
+    public #String scopes() { return this.all.get("scope"); }
+
+    public int64 expiresAt() { return this.exp; }
+
+    public int64 issuedAt() { return this.iat; }
+
+    public int32 groupCount() { return this.groupNames.count(); }
+
+    public #String groupAt(int32 i) {
+        String out = "" + this.groupNames.get(i);
+        return #out;
+    }
+
+    public boolean inGroup(String group) {
+        int32 i = 0;
+        while (i < this.groupNames.count()) {
+            if (this.groupNames.get(i).equals(group)) { return true; }
+            i = i + 1;
+        }
+        return false;
+    }
+
+    /** The custom attributes with the provider prefix stripped (§15.11). */
+    public #Attributes attributes() {
+        Attributes out = heap Attributes();
+        int32 i = 0;
+        while (i < this.all.count()) {
+            String name #= this.all.nameAt(i);
+            if (name.startsWith("custom:")) {
+                String bare #= name.substring(7, name.byteLength());
+                String value #= this.all.valueAt(i);
+                out.set(bare, value);
+            }
+            i = i + 1;
+        }
+        return #out;
+    }
+
+    /** Any claim by its wire name, rendered as text; "" when absent. */
+    public #String claim(String name) { return this.all.get(name); }
+
+    public boolean has(String name) { return this.all.has(name); }
+}
