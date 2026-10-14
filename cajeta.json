@@ -31,10 +31,15 @@
     // dev.cajeta.cloud is currently broken. Measured 2026-09-21 by
     // fetching the 0.1.0 blob from Olla and compiling a two-line consumer
     // against it.
+    //
+    // 0.3.0 carries the identity full port (identity plan Unit 3):
+    // Authenticator, Account and TokenVerifier, reached through UserPool.
+    // UserPool gained registerPasswordless and the three accessors, so an
+    // adapter written against 0.2.x must add them; hence the minor bump.
 
     "details": {
         "name":               "dev.cajeta.cloud",
-        "version":            "0.2.4",
+        "version":            "0.3.0",
         "description":        "cajeta-cloud — provider-neutral cloud ports: object store + stream + identity, in-memory drivers, conformance testkits, capability negotiation",
         "license":            "Apache-2.0",
         "authors":            ["Julian Klappenbach"],
