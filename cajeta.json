@@ -39,7 +39,7 @@
 
     "details": {
         "name":               "dev.cajeta.cloud",
-        "version":            "0.3.0",
+        "version":            "0.3.1",
         "description":        "cajeta-cloud — provider-neutral cloud ports: object store + stream + identity, in-memory drivers, conformance testkits, capability negotiation",
         "license":            "Apache-2.0",
         "authors":            ["Julian Klappenbach"],
@@ -85,7 +85,7 @@
             // Raised to v0.41.0 with identity selection (identity plan
             // Unit 2): 48 passed, 0 failed, 2 skipped, and the six selection
             // fixtures, on the released binary 2026-10-13.
-            "version": "0.41.0"
+            "version": "0.42.1"
         },
 
         // THE load-bearing line (§14.11, amended 2026-10-13): no filesystem,
