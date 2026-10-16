@@ -9,9 +9,8 @@
 # repo's GitHub Release; ./run-tests.sh takes its Olla-fetch path for
 # dev.cajeta.unit. The Olla publish authenticates with the job's GitHub
 # identity token (trusted publishing; this repository is bound to
-# dev.cajeta on Olla). The only secrets it needs are the CI signing key,
-# OLLA_SIGNING_KEY_PEM and OLLA_SIGNING_KEY_ID, the same pair every
-# dev.cajeta library holds. Releases up to 0.3.1 bridged through
+# dev.cajeta on Olla), and Olla signs the upload with dev.cajeta's held
+# key; the repository holds no Olla secret. Releases up to 0.3.1 bridged through
 # cajeta-logging's publish-sibling workflow because this repository had
 # no publish token; from here they publish from this workflow.
 
@@ -153,5 +152,3 @@ jobs:
         with:
           cja-path: ${{ steps.build.outputs.artifact }}
           version: ${{ steps.build.outputs.version }}
-          signing-key-pem: ${{ secrets.OLLA_SIGNING_KEY_PEM }}
-          signing-key-id: ${{ secrets.OLLA_SIGNING_KEY_ID }}
