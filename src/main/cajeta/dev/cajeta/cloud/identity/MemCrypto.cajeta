@@ -2,12 +2,12 @@ package dev.cajeta.cloud.identity;
 
 import cajeta.codec.Base64;
 import cajeta.hash.Hash;
-import cajeta.hash.Pbkdf2;
-import cajeta.hash.SecureRandom;
-import cajeta.hash.Sha256;
-import cajeta.hash.Totp;
 import cajeta.lang.Guid;
 import cajeta.lang.String;
+import dev.cajeta.crypto.Pbkdf2;
+import dev.cajeta.crypto.SecureRandom;
+import dev.cajeta.crypto.Sha256;
+import dev.cajeta.crypto.Totp;
 
 /**
  * The memory driver's secrets (identity spec §4.7, §15.18): password

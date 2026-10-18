@@ -39,7 +39,7 @@
 
     "details": {
         "name":               "dev.cajeta.cloud",
-        "version":            "0.3.2",
+        "version":            "0.4.0",
         "description":        "cajeta-cloud — provider-neutral cloud ports: object store + stream + identity, in-memory drivers, conformance testkits, capability negotiation",
         "license":            "Apache-2.0",
         "authors":            ["Julian Klappenbach"],
@@ -84,8 +84,9 @@
             //
             // Raised to v0.41.0 with identity selection (identity plan
             // Unit 2): 48 passed, 0 failed, 2 skipped, and the six selection
-            // fixtures, on the released binary 2026-10-13.
-            "version": "0.42.1"
+            // fixtures, on the released binary 2026-10-13. Raised to v0.43.1
+            // with dev.cajeta.crypto 0.1.0, whose archive that release built.
+            "version": "0.43.1"
         },
 
         // THE load-bearing line (§14.11, amended 2026-10-13): no filesystem,
@@ -94,9 +95,13 @@
         // §9.2, the AWS order: code overrides the environment).
         "capabilities": ["env"],
 
-        // No provider SDK, no local backend, no cajeta library — pure
-        // stdlib (§14.13).
-        "dependencies": {},
+        // No provider SDK and no local backend (§14.13). The one cajeta
+        // library is dev.cajeta.crypto: the stdlib's hashes moved there,
+        // and identity verifies RS256 and ES256 and signs ES256 with it
+        // (cajeta-crypto spec §7).
+        "dependencies": {
+            "dev.cajeta.crypto": "0.1.0"
+        },
 
         // 0.3.0, raised from 0.2.0 with the toolchain and for the same
         // reason the toolchain moved. A dependency archive is re-checked

@@ -106,15 +106,47 @@ fi
 [[ -f "$unit_cja" ]] || { echo "could not resolve a dev.cajeta.unit archive" >&2; exit 1; }
 echo ">> cajeta-unit: $unit_cja"
 
+# dev.cajeta.crypto (identity signs and verifies tokens with it): the store at
+# the cajeta.json pin, then a sha256-verified Olla fetch, like unit above.
+# $CRYPTO_CJA overrides. Its .cja bakes the native shim for every platform,
+# and the compiler links it from the classpath archive.
+crypto_cja="${CRYPTO_CJA:-}"
+if [[ -z "$crypto_cja" ]]; then
+    CRYPTO_VER="$(sed -n 's/.*"dev\.cajeta\.crypto"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' \
+        "$here/cajeta.json" | head -1)"
+    [[ -n "$CRYPTO_VER" ]] || { echo "no dev.cajeta.crypto pin in cajeta.json" >&2; exit 1; }
+    store_cja="$OLLA_HOME/dev.cajeta.crypto/$CRYPTO_VER/dev.cajeta.crypto-$CRYPTO_VER.cja"
+    cache_cja="$here/build/.crypto-cache/dev.cajeta.crypto-$CRYPTO_VER.cja"
+    if [[ -f "$store_cja" ]]; then crypto_cja="$store_cja"
+    elif [[ -f "$cache_cja" ]]; then crypto_cja="$cache_cja"
+    else
+        echo ">> fetching dev.cajeta.crypto $CRYPTO_VER from $OLLA_URL"
+        meta="$(curl -fsS "$OLLA_URL/v2/resolve?name=dev.cajeta.crypto&version=$CRYPTO_VER")"
+        sha="$(printf '%s' "$meta" | sed -n 's/.*"sha256":"sha256:\([0-9a-f]*\)".*/\1/p')"
+        [[ -n "$sha" ]] || { echo "/v2/resolve gave no sha256" >&2; exit 1; }
+        mkdir -p "$(dirname "$cache_cja")"
+        curl -fsS -o "$cache_cja" "$OLLA_URL/v2/blob/$sha"
+        got="$(sha256_of "$cache_cja")"
+        [[ "$got" == "$sha" ]] || { rm -f "$cache_cja"; echo "sha256 mismatch fetching crypto" >&2; exit 1; }
+        crypto_cja="$cache_cja"
+    fi
+fi
+[[ -f "$crypto_cja" ]] || { echo "could not resolve a dev.cajeta.crypto archive" >&2; exit 1; }
+echo ">> cajeta-crypto: $crypto_cja"
+
 # §14.11 + §14.13 (plan 1.1.1/1.1.2): the interface library declares only
 # `env` (§14.11 as amended 2026-10-13, for IDENTITY_PROVIDER) and NO runtime
 # dependencies — a filesystem driver or a provider SDK landing here is a spec
 # violation, not a shortcut.
 grep -q '"capabilities": \["env"\]' "$here/cajeta.json" \
     || { echo "SPEC VIOLATION (§14.11): capabilities must be exactly [\"env\"]" >&2; exit 1; }
-grep -q '"dependencies": {}' "$here/cajeta.json" \
-    || { echo "SPEC VIOLATION (§14.13): runtime dependencies must stay {}" >&2; exit 1; }
-echo ">> manifest: capabilities [\"env\"] and dependencies {} verified"
+# §14.13 bars provider SDKs and local backends. The one runtime dependency is
+# dev.cajeta.crypto, which took the stdlib's hashes and gave the signatures
+# (cajeta-crypto spec §7); anything else is a violation.
+deps="$(python3 -c 'import json,re,sys; t=re.sub(r"(?m)^\s*//.*$","",open(sys.argv[1]).read()); print(",".join(sorted(json.loads(t)["settings"]["dependencies"])))' "$here/cajeta.json")"
+[[ "$deps" == "dev.cajeta.crypto" ]] \
+    || { echo "SPEC VIOLATION (§14.13): runtime dependencies must be exactly dev.cajeta.crypto, got: $deps" >&2; exit 1; }
+echo ">> manifest: capabilities [\"env\"] and dependencies {dev.cajeta.crypto} verified"
 
 # `details.version` is the single source of truth and `Cloud.version()`
 # hands consumers a literal copy of it. Nothing at runtime can compare
@@ -131,12 +163,12 @@ source_version="$(sed -n 's/.*version()[^"]*"\([^"]*\)".*/\1/p' \
 echo ">> manifest: version $manifest_version matches Cloud.version()"
 
 echo ">> building cloud library .cja"
-"$CAJETA" --emit=cja -o "$out/cloud.cja" \
+"$CAJETA" --emit=cja --classpath="$crypto_cja" -o "$out/cloud.cja" \
     dev.cajeta.cloud.Cloud.run "$here/src/main/cajeta" "$out" >/dev/null
 
 echo ">> building + running the test binary"
 "$CAJETA" --emit=exe --profile=test \
-    --classpath="$out/cloud.cja,$unit_cja" \
+    --classpath="$out/cloud.cja,$crypto_cja,$unit_cja" \
     -o "$out/ctests" \
     dev.cajeta.cloud.selftest.TestMain.run "$here/src/test/cajeta" "$out" >/dev/null
 
@@ -159,7 +191,7 @@ selection_case() {
     for part in "$@"; do cp -r "$sel/$part/." "$root/src/"; done
     local pflag=()
     [[ -n "$profile" ]] && pflag=(--profile="$profile")
-    if ! "$CAJETA" --emit=exe "${pflag[@]}" --classpath="$out/cloud.cja" \
+    if ! "$CAJETA" --emit=exe "${pflag[@]}" --classpath="$out/cloud.cja,$crypto_cja" \
             -o "$root/prog" dev.cajeta.cloud.selectfix.Main.run \
             "$root/src" "$root/out" > "$root/build.log" 2>&1; then
         echo "  FAIL $label: build failed"; sed -n '1,20p' "$root/build.log"

@@ -1,18 +1,24 @@
 package dev.cajeta.cloud.identity;
 
+import cajeta.codec.Base64;
+import cajeta.codec.Base64Exception;
+import cajeta.codec.json.Json;
 import cajeta.codec.json.JsonArray;
 import cajeta.codec.json.JsonObject;
+import cajeta.codec.json.JsonParseException;
 import cajeta.codec.json.JsonValue;
 import cajeta.collection.ArrayList;
-import cajeta.hash.Hash;
-import cajeta.hash.HmacSha256;
 import cajeta.lang.String;
+import dev.cajeta.crypto.sig.InvalidKeyException;
+import dev.cajeta.crypto.sig.Jwk;
+import dev.cajeta.crypto.sig.JwsAlgorithm;
+import dev.cajeta.crypto.sig.Signatures;
 
 /**
  * A compact JWT split and decoded but not yet trusted (identity plan
  * 3.2.3): the header's algorithm and key id, the payload, and what the
- * signature covers. A verifier checks the signature before it believes
- * a single claim.
+ * signature covers. A verifier checks the signature against its JWKS with
+ * {@link #verifiedBy} before it believes a single claim.
  */
 public final class DecodedJwt {
 
@@ -37,36 +43,87 @@ public final class DecodedJwt {
     }
 
     /**
-     * Whether the signature is HS256 under `key`, compared in constant
-     * time. Any other algorithm answers false: RS256 and ES256 are
-     * refused by {@link #requireHs256} with the reason.
+     * Whether the signature verifies under the key in `keys` whose `kid`
+     * is this token's (cajeta-crypto spec §7.1): RS256 or ES256, through
+     * dev.cajeta.crypto. Any other algorithm, a token with no `kid`, a `kid`
+     * the set does not hold, a key whose own `alg` names another algorithm,
+     * or an unusable key answers false.
      */
-    public boolean signedWithHs256(int8[] key, int64 keyLen) {
-        if (!this.algName.equals("HS256")) { return false; }
+    public boolean verifiedBy(Jwks keys) {
+        JwsAlgorithm alg = JwsAlgorithm.RS256;
+        if (this.algName.equals("ES256")) {
+            alg = JwsAlgorithm.ES256;
+        } else if (!this.algName.equals("RS256")) {
+            return false;
+        }
+        if (this.keyId.byteLength() == 0) { return false; }
+        try {
+            String doc #= keys.json();
+            JsonValue root #= Json.parse(doc);
+            if (root.kind() != JsonValue.OBJECT) { return false; }
+            JsonValue list = root.object().get("keys");
+            if (list == null || list.kind() != JsonValue.ARRAY) { return false; }
+            JsonArray arr = list.array();
+            int32 i = 0;
+            while (i < arr.count()) {
+                JsonValue k = arr.get(i);
+                if (k.kind() == JsonValue.OBJECT) {
+                    String kid #= Jwt.member(k, "kid");
+                    if (kid.equals(this.keyId)) {
+                        return this.verifiedByKey(alg, k);
+                    }
+                }
+                i = i + 1;
+            }
+        } catch (JsonParseException e) {
+            return false;
+        }
+        return false;
+    }
+
+    boolean verifiedByKey(JwsAlgorithm alg, JsonValue k) {
+        String keyAlg #= Jwt.member(k, "alg");
+        if (keyAlg.byteLength() > 0 && !keyAlg.equals(this.algName)) { return false; }
+        String kty #= Jwt.member(k, "kty");
+        try {
+            if (alg == JwsAlgorithm.RS256) {
+                if (!kty.equals("RSA")) { return false; }
+                int8[] n #= Base64.decode(Jwt.member(k, "n"));
+                int8[] e #= Base64.decode(Jwt.member(k, "e"));
+                Jwk rsa #= Jwk.rsa(n, n.count(), e, e.count());
+                return this.checkedBy(alg, rsa);
+            }
+            String crv #= Jwt.member(k, "crv");
+            if (!kty.equals("EC") || !crv.equals("P-256")) { return false; }
+            int8[] x #= Base64.decode(Jwt.member(k, "x"));
+            int8[] y #= Base64.decode(Jwt.member(k, "y"));
+            if (x.count() != 32L || y.count() != 32L) { return false; }
+            Jwk ec #= Jwk.p256(x, y);
+            return this.checkedBy(alg, ec);
+        } catch (InvalidKeyException e) {
+            return false;
+        } catch (Base64Exception e) {
+            return false;
+        }
+        return false;
+    }
+
+    boolean checkedBy(JwsAlgorithm alg, Jwk key) {
         int8[] in #= this.input.toBytes();
-        int8[] mac #= HmacSha256.mac(key, keyLen, in,
-            (int64) this.input.byteLength());
-        return Hash.constantTimeEquals(mac, 32L, this.sig,
-            (int64) this.sig.count());
+        return Signatures.verify(alg, key, in, (int64) this.input.byteLength(),
+            this.sig, (int64) this.sig.count());
     }
 
     /**
-     * Refuse every algorithm but HS256. RS256 and ES256 are named as the
-     * stdlib gap they are (§5.6, §15.15), `none` and the rest as an
-     * algorithm a verifier must not accept.
+     * Refuse every algorithm but RS256 and ES256 (cajeta-crypto spec §7.2).
+     * A verifier holds public keys, so it cannot check HS256, and taking a
+     * public key as an HMAC secret is the classic forgery.
      */
-    public void requireHs256(String provider, String operation) {
-        if (this.algName.equals("HS256")) { return; }
-        if (this.algName.equals("RS256") || this.algName.equals("ES256")) {
-            throw heap IdentityException(
-                IdentityException.UNSUPPORTED_CAPABILITY(), provider,
-                operation, "-", this.algName + " verification needs RSA or "
-                + "ECDSA in the stdlib, which it does not have yet (identity "
-                + "spec §5.6, §15.15)");
-        }
+    public void requireAsymmetric(String provider, String operation) {
+        if (this.algName.equals("RS256") || this.algName.equals("ES256")) { return; }
         throw heap IdentityException(IdentityException.INVALID_TOKEN(),
             provider, operation, "-", "token failed the algorithm check: "
-            + "only HS256 is accepted");
+            + "only RS256 and ES256 are accepted");
     }
 
     /** The payload's claims, decoded (a fresh value each call). */

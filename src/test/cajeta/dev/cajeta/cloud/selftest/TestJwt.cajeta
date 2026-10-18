@@ -5,14 +5,21 @@ import cajeta.codec.json.Json;
 import cajeta.codec.json.JsonArray;
 import cajeta.codec.json.JsonObject;
 import cajeta.codec.json.JsonValue;
-import cajeta.hash.HmacSha256;
 import cajeta.lang.String;
+import dev.cajeta.cloud.identity.MemoryUserPool;
+import dev.cajeta.crypto.HmacSha256;
+import dev.cajeta.crypto.sig.EcKeyPair;
+import dev.cajeta.crypto.sig.Jwk;
+import dev.cajeta.crypto.sig.JwsAlgorithm;
+import dev.cajeta.crypto.sig.Signatures;
 
 /**
- * A test-local HS256 check (identity plan 3.1.6, spec §10.4): it splits,
- * decodes, signs and verifies with the stdlib alone, never through the
+ * A test-local token check (identity plan 3.1.6, spec §10.4): it splits,
+ * decodes and verifies with dev.cajeta.crypto alone, never through the
  * port's codec or the driver's verifier, so a driver whose tokens only
- * its own code accepts is caught.
+ * its own code accepts is caught. Forged tokens are signed under the pool's
+ * own key through the memory driver's test seam, or under a key the test
+ * makes, or with HS256, which every verifier must refuse.
  */
 final class TestJwt {
 
@@ -55,45 +62,69 @@ final class TestJwt {
 
     static #String payload(String token) { return TestJwt.decoded(token, 1); }
 
-    static #String sign(String headerJson, String payloadJson, int8[] key,
-                        int64 keyLen) {
+    static #String signingInput(String headerJson, String payloadJson) {
         int8[] h #= headerJson.toBytes();
         int8[] p #= payloadJson.toBytes();
         String hs #= Base64.encodeUrlSafe(h, (int64) headerJson.byteLength());
         String ps #= Base64.encodeUrlSafe(p, (int64) payloadJson.byteLength());
         String input #= hs + "." + ps;
+        return #input;
+    }
+
+    /** An HS256 token over the given header and payload. */
+    static #String signHs256(String headerJson, String payloadJson, int8[] key,
+                             int64 keyLen) {
+        String input #= TestJwt.signingInput(headerJson, payloadJson);
         int8[] in #= input.toBytes();
         int8[] mac #= HmacSha256.mac(key, keyLen, in,
             (int64) input.byteLength());
-        String sig #= Base64.encodeUrlSafe(mac, 32L);
-        String out #= input + "." + sig;
+        String out #= input + "." + Base64.encodeUrlSafe(mac, 32L);
         return #out;
     }
 
-    static boolean verify(String token, int8[] key, int64 keyLen) {
+    /** An ES256 token over the given header and payload, under `pair`. */
+    static #String signEs256(String headerJson, String payloadJson, EcKeyPair pair) {
+        String input #= TestJwt.signingInput(headerJson, payloadJson);
+        int8[] in #= input.toBytes();
+        int8[] sig #= pair.sign(in, (int64) input.byteLength());
+        String out #= input + "." + Base64.encodeUrlSafe(sig, 64L);
+        return #out;
+    }
+
+    /** The JWKS's first key as a JWK object of its own (kty, crv, x, y). */
+    static #String firstEcJwk(String jwks) {
+        String j #= "{\"kty\":\"" + TestJwt.jwksMember(jwks, "kty")
+            + "\",\"crv\":\"" + TestJwt.jwksMember(jwks, "crv")
+            + "\",\"x\":\"" + TestJwt.jwksMember(jwks, "x")
+            + "\",\"y\":\"" + TestJwt.jwksMember(jwks, "y") + "\"}";
+        return #j;
+    }
+
+    /** Whether `token` is an ES256 signature under the JWKS's first key. */
+    static boolean verify(String token, String jwks) {
         int32 a = TestJwt.dot(token, 0);
         if (a < 0) { return false; }
         int32 b = TestJwt.dot(token, a + 1);
         if (b < 0) { return false; }
+        String jwkText #= TestJwt.firstEcJwk(jwks);
+        Jwk key #= Jwk.parse(jwkText);
         String input #= token.substring(0, b);
-        String sig #= token.substring(b + 1, token.byteLength());
+        String sigText #= token.substring(b + 1, token.byteLength());
         int8[] in #= input.toBytes();
-        int8[] mac #= HmacSha256.mac(key, keyLen, in,
-            (int64) input.byteLength());
-        String expect #= Base64.encodeUrlSafe(mac, 32L);
-        return expect.equals(sig);
+        int8[] sig #= Base64.decode(sigText);
+        return Signatures.verify(JwsAlgorithm.ES256, key, in,
+            (int64) input.byteLength(), sig, (int64) sig.count());
     }
 
-    /** Re-sign the token's header over its payload with one substring replaced. */
-    static #String forge(String token, String from, String to, int8[] key,
-                         int64 keyLen) {
+    /** The token's payload with one substring replaced, re-signed under the pool's key. */
+    static #String forge(MemoryUserPool p, String token, String from, String to) {
         String h #= TestJwt.header(token);
-        String p #= TestJwt.payload(token);
-        String p2 #= p.replace(from, to);
-        return TestJwt.sign(h, p2, key, keyLen);
+        String pl #= TestJwt.payload(token);
+        String p2 #= pl.replace(from, to);
+        return p.hooks().signedToken(h, p2);
     }
 
-    /** A member of the JWKS's first key, read with the stdlib JSON parser. */
+    /** A member of the JWKS's first key, read with the stdlib JSON parser, or "". */
     static #String jwksMember(String jwks, String name) {
         JsonValue doc #= Json.parse(jwks);
         JsonValue keysValue = doc.object().get("keys");
@@ -106,10 +137,5 @@ final class TestJwt {
             return #none;
         }
         return TestJwt.text(v.asBytes(), v.asBytesLength());
-    }
-
-    static #int8[] jwksKey(String jwks) {
-        String k #= TestJwt.jwksMember(jwks, "k");
-        return Base64.decode(k);
     }
 }

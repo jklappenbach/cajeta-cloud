@@ -176,10 +176,13 @@ digits and thirty seconds, so Microsoft and Google Authenticator read the
 `otpauth://` URI that enrollment returns. A wrong password and an unknown
 username answer the same `INVALID_CREDENTIALS` and the same message.
 
-The memory driver signs HS256 under a per-pool key from the CSPRNG and
-publishes it in the JWKS, so tokens verify the same way against it and
+The memory driver signs ES256 under a per-pool P-256 pair and publishes
+its public half in the JWKS, so tokens verify the same way against it and
 against a provider, and a test can check them without the driver
-(§5.5, §10.4). Tokens last an hour, refresh tokens thirty days, codes three
+(§5.5, §10.4). Verifiers check RS256 and ES256 over the JWKS through
+[dev.cajeta.crypto](https://github.com/jklappenbach/cajeta-crypto) and
+refuse HS256, since a verifier holding public keys cannot check a shared
+secret. Tokens last an hour, refresh tokens thirty days, codes three
 minutes and reset codes an hour. Five wrong passwords or codes lock an
 account for thirty seconds, doubling to fifteen minutes, and the error
 carries `retryAfter()`. Signing out ends the session: its refresh token and
@@ -263,7 +266,7 @@ lacking it would surface as data corruption, not a startup error.
 | `identity.groups` | yes | — | Cognito adapter |
 | `identity.totp` / `sms-otp` / `email-otp` | yes (codes via hooks) | — | Cognito adapter |
 | `identity.refresh` / `revocation` / `admin` / `password-reset` | yes | — | Cognito adapter |
-| `identity.jwks` | yes (HS256, key published) | — | Cognito adapter (RS256, needs RSA in the stdlib) |
+| `identity.jwks` | yes (ES256, public key published) | — | Cognito adapter (RS256, verifiable since 0.4.0) |
 | `identity.passwordless` | yes | — | Cognito adapter (Essentials tier) |
 | `identity.totp-sign-in` | yes | — | no: Cognito takes TOTP as a second factor only |
 | `identity.passkeys` / `introspection` | no | — | Cognito adapter |
@@ -313,6 +316,10 @@ reach a log (§9.5).
 CAJETA=<path-to-cajeta> ./run-tests.sh   # 43 tests
 CAJETA=<path-to-cajeta> ./run-tour.sh    # the self-checking tour
 ```
+
+Since 0.4.0 the library depends on `dev.cajeta.crypto`; both scripts take
+it from `~/.olla` at the `cajeta.json` pin, and `run-tests.sh` fetches it from
+Olla when it is not there (`CRYPTO_CJA` overrides).
 
 Toolchain: cajeta v0.29.0. v0.17.4, which this workflow pinned until
 now, compiles the library and then the test binary segfaults walking

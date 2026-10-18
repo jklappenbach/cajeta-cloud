@@ -7,9 +7,12 @@ import cajeta.codec.json.JsonArray;
 import cajeta.codec.json.JsonObject;
 import cajeta.codec.json.JsonValue;
 import cajeta.collection.ArrayList;
-import cajeta.hash.HmacSha256;
-import cajeta.hash.Totp;
 import cajeta.lang.String;
+import dev.cajeta.crypto.Totp;
+import dev.cajeta.crypto.sig.InvalidKeyException;
+import dev.cajeta.crypto.sig.Jwk;
+import dev.cajeta.crypto.sig.JwsAlgorithm;
+import dev.cajeta.crypto.sig.Signatures;
 import cajeta.time.Clock;
 import dev.cajeta.cloud.Capabilities;
 import dev.cajeta.cloud.CloudException;
@@ -270,19 +273,50 @@ public final class AuthenticationContract {
         return AuthenticationContract.text(v.asBytes(), v.asBytesLength());
     }
 
-    /** HS256 over the token's first two segments, checked with the stdlib alone (§10.4). */
-    static boolean hs256Holds(String token, int8[] key, int64 keyLen) {
+    /** The JWKS's first key as a JWK of its own, RSA or EC, or "" for any other kty. */
+    static #String firstPublicJwk(String jwks, String kty) {
+        if (kty.equals("RSA")) {
+            String r #= "{\"kty\":\"RSA\",\"n\":\"" + AuthenticationContract.jwksMember(jwks, "n")
+                + "\",\"e\":\"" + AuthenticationContract.jwksMember(jwks, "e") + "\"}";
+            return #r;
+        }
+        if (kty.equals("EC")) {
+            String c #= "{\"kty\":\"EC\",\"crv\":\"" + AuthenticationContract.jwksMember(jwks, "crv")
+                + "\",\"x\":\"" + AuthenticationContract.jwksMember(jwks, "x")
+                + "\",\"y\":\"" + AuthenticationContract.jwksMember(jwks, "y") + "\"}";
+            return #c;
+        }
+        String none = "";
+        return #none;
+    }
+
+    /**
+     * The token's RS256 or ES256 signature over its first two segments,
+     * checked against the JWKS's first key with dev.cajeta.crypto alone,
+     * never through the port's codec (§10.4).
+     */
+    static boolean signatureHolds(String token, String jwks) {
         int32 a = AuthenticationContract.dot(token, 0);
         if (a < 0) { return false; }
         int32 b = AuthenticationContract.dot(token, a + 1);
         if (b < 0) { return false; }
-        String input #= token.substring(0, b);
-        String sig #= token.substring(b + 1, token.byteLength());
-        int8[] in #= input.toBytes();
-        int8[] mac #= HmacSha256.mac(key, keyLen, in,
-            (int64) input.byteLength());
-        String expect #= Base64.encodeUrlSafe(mac, 32L);
-        return expect.equals(sig);
+        String kty #= AuthenticationContract.jwksMember(jwks, "kty");
+        JwsAlgorithm alg = JwsAlgorithm.ES256;
+        if (kty.equals("RSA")) { alg = JwsAlgorithm.RS256; }
+        String jwk #= AuthenticationContract.firstPublicJwk(jwks, kty);
+        if (jwk.byteLength() == 0) { return false; }
+        try {
+            Jwk key #= Jwk.parse(jwk);
+            String input #= token.substring(0, b);
+            String sigText #= token.substring(b + 1, token.byteLength());
+            int8[] in #= input.toBytes();
+            int8[] sig #= Base64.decode(sigText);
+            return Signatures.verify(alg, key, in, (int64) input.byteLength(),
+                sig, (int64) sig.count());
+        } catch (InvalidKeyException e) {
+            return false;
+        }
+        return false;
     }
 
     // --- §4.1 to §4.3, §15.14 ------------------------------------------------
@@ -424,15 +458,16 @@ public final class AuthenticationContract {
             Jwks keys #= v.jwks();
             String doc #= keys.json();
             String kty #= AuthenticationContract.jwksMember(doc, "kty");
-            if (kty.equals("oct")) {
-                String k #= AuthenticationContract.jwksMember(doc, "k");
-                int8[] key #= Base64.decode(k);
-                AuthenticationContract.check(
-                    AuthenticationContract.hs256Holds(access, key,
-                        (int64) key.count()), "token-jwks",
-                    "a token must verify independently over the published "
-                    + "JWKS, not only through the driver's verifier (§10.4)");
-            }
+            String secret #= AuthenticationContract.jwksMember(doc, "k");
+            String priv #= AuthenticationContract.jwksMember(doc, "d");
+            AuthenticationContract.check(!kty.equals("oct") && secret.byteLength() == 0
+                && priv.byteLength() == 0, "token-jwks-public",
+                "a JWKS must publish public keys only: no symmetric key, no private "
+                + "member (cajeta-crypto spec §7.2)");
+            AuthenticationContract.check(
+                AuthenticationContract.signatureHolds(access, doc), "token-jwks",
+                "a token must verify independently over the published "
+                + "JWKS, not only through the driver's verifier (§10.4)");
         }
         if (clock != null) {
             clock.set(t.accessExpiresAt() + 1L);

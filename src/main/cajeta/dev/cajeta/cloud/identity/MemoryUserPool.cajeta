@@ -100,7 +100,7 @@ public final class MemoryUserPool implements UserPool {
             c = "seeds are held in process memory only and die with it (§15.18.9)";
         }
         if (capability.equals("identity.jwks")) {
-            c = "HS256 under a per-process key; the JWKS publishes it, so it is for tests and development only";
+            c = "ES256 under a per-process key pair that dies with the process, so it is for tests and development only";
         }
         return #c;
     }

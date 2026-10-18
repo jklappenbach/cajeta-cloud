@@ -6,10 +6,11 @@ import cajeta.collection.ArrayList;
 import cajeta.collection.Collectors;
 import cajeta.collection.HashMap;
 import cajeta.concurrent.Lock;
-import cajeta.hash.SecureRandom;
-import cajeta.hash.Totp;
 import cajeta.lang.String;
 import dev.cajeta.cloud.Capabilities;
+import dev.cajeta.crypto.SecureRandom;
+import dev.cajeta.crypto.Totp;
+import dev.cajeta.crypto.sig.EcKeyPair;
 
 /**
  * The memory driver's shared guts, held by the pool, its hooks and its
@@ -17,8 +18,8 @@ import dev.cajeta.cloud.Capabilities;
  * MemState pattern). One lock guards every operation (identity spec
  * §2.5); every method below expects the caller to hold it.
  *
- * Tokens are HS256 JWTs under a key drawn from the CSPRNG when the pool
- * is made (§5.5). A sign-in opens an origin, which its tokens carry as
+ * Tokens are ES256 JWTs under a P-256 pair generated when the pool is
+ * made (§5.5, cajeta-crypto spec §7.3); the JWKS publishes its public half. A sign-in opens an origin, which its tokens carry as
  * `origin_jti`: signing out ends the origin, so its refresh token and the
  * Account plane stop accepting it, while the offline verifier keeps
  * accepting its access token until it expires (§4.6).
@@ -32,8 +33,9 @@ final class MemIdentityState {
     TimeSource clock;
     boolean totpRequired;
 
-    int8[] key;
+    EcKeyPair key;
     String kid;
+    String keysDoc;
     String issuer;
     String clientId;
     HashMap<String, MemSession> sessions;
@@ -52,8 +54,9 @@ final class MemIdentityState {
         this.subjectByName = heap HashMap<String, String>();
         this.clock #= clock;
         this.totpRequired = false;
-        this.key #= SecureRandom.bytes(32L);
+        this.key #= EcKeyPair.generateP256();
         this.kid #= MemCrypto.handle(6L);
+        this.keysDoc #= "{\"keys\":[" + this.key.publicJwk(this.kid) + "]}";
         this.issuer #= "memory://identity/" + MemCrypto.handle(6L);
         this.clientId = "memory-client";
         this.sessions = heap HashMap<String, MemSession>();
@@ -189,8 +192,8 @@ final class MemIdentityState {
         String ji #= MemCrypto.handle(12L);
         String ap #= this.payload(u, origin, true, now, exp, ja);
         String ip #= this.payload(u, origin, false, now, exp, ji);
-        String access #= Jwt.encodeHs256(this.kid, ap, this.key, 32L);
-        String idt #= Jwt.encodeHs256(this.kid, ip, this.key, 32L);
+        String access #= Jwt.encodeEs256(this.kid, ap, this.key);
+        String idt #= Jwt.encodeEs256(this.kid, ip, this.key);
         String rt = "";
         int64 rexp = 0L;
         if (withRefresh && this.caps.supports(IdentityCapability.REFRESH())) {
@@ -222,8 +225,9 @@ final class MemIdentityState {
     /** Offline verification (§5.3, §15.10): signature, issuer, audience, expiry, use. */
     #Claims verify(String token, int32 use, String operation) {
         DecodedJwt d #= Jwt.decode(token, "memory", operation);
-        d.requireHs256("memory", operation);
-        if (!d.kid().equals(this.kid) || !d.signedWithHs256(this.key, 32L)) {
+        d.requireAsymmetric("memory", operation);
+        Jwks keys = heap Jwks(this.keysDoc);
+        if (!d.verifiedBy(keys)) {
             MemIdentityState.badToken(operation, "-", "signature");
         }
         Claims c #= d.claims();
@@ -245,11 +249,7 @@ final class MemIdentityState {
 
     #Jwks jwks() {
         this.requireCap(IdentityCapability.JWKS(), "jwks", "-");
-        String k #= Base64.encodeUrlSafe(this.key, 32L);
-        String doc #= "{\"keys\":[{\"kty\":\"oct\",\"use\":\"sig\","
-            + "\"alg\":\"HS256\",\"kid\":" + Jwt.quote(this.kid) + ",\"k\":"
-            + Jwt.quote(k) + "}]}";
-        Jwks out = heap Jwks(doc);
+        Jwks out = heap Jwks(this.keysDoc);
         return #out;
     }
 

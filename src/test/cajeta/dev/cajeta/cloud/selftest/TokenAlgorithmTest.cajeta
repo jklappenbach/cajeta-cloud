@@ -1,0 +1,162 @@
+package dev.cajeta.cloud.selftest;
+
+import cajeta.lang.String;
+import dev.cajeta.unit.Assert;
+import dev.cajeta.cloud.identity.Claims;
+import dev.cajeta.cloud.identity.DecodedJwt;
+import dev.cajeta.cloud.identity.IdentityException;
+import dev.cajeta.cloud.identity.Jwks;
+import dev.cajeta.cloud.identity.Jwt;
+import dev.cajeta.cloud.identity.ManualTimeSource;
+import dev.cajeta.cloud.identity.MemoryUserPool;
+import dev.cajeta.cloud.identity.RegistrationResult;
+import dev.cajeta.cloud.identity.SignInResult;
+import dev.cajeta.cloud.identity.TokenUse;
+import dev.cajeta.cloud.identity.TokenVerifier;
+import dev.cajeta.cloud.identity.Tokens;
+import dev.cajeta.crypto.SecureRandom;
+import dev.cajeta.crypto.sig.EcKeyPair;
+
+/**
+ * cajeta-crypto plan 6.1.1, spec §7: the memory driver issues ES256 and
+ * serves its public JWK (7.3), HS256 is refused (7.2), a token under a key
+ * the JWKS does not hold or naming a kid it does not hold is refused, and an
+ * RS256 token verifies over its JWKS (7.1). The RS256 vector was generated
+ * with Python's cryptography package on 2026-10-18 and checked there; the
+ * RS256 tokens expire in 2100.
+ */
+public class TokenAlgorithmTest {
+
+    static String RS256_JWKS = "{\"keys\":[{\"kty\":\"RSA\",\"use\":\"sig\",\"alg\":\"RS256\",\""
+        + "kid\":\"rsa-1\",\"n\":\"yGQhLtw6JVLY3RKoQIdiq7oNjChcvncRTsLDJdyI"
+        + "xcmUg7YeC8lAGD9PFdWKwYwaHPsZh2BomFtHZQgklYFerP5ZDMe5Y-SrnX_x7_bf"
+        + "XEJeefXIxA1tRfjn0RhlKy_C2I78vxxKlDmauOlArpN0bNmzGw9eFtGA4ELcShkp"
+        + "G8NXkFKIMQ93vTdGLXW4fBfVPKM6xr3cdclU74dO0WORVwPJ-99jcnGtiBQ-lkIV"
+        + "cAJZzYb9CN5ebulcOe91Sg8srzy0IIwnHLqsFkU7PP8vh5wKl7VwMIsW5mWvgzDe"
+        + "o3MaxTpK2eBGbu7XkXwATc5KtSXyL6zCWdXL2D38fVQFRw\",\"e\":\"AQAB\"}"
+        + "]}";
+    static String RS256_GOOD = "eyJhbGciOiJSUzI1NiIsImtpZCI6InJzYS0xIiwidHlwIjoiSldUIn0.eyJzdWIi"
+        + "OiJ1LXJzMjU2IiwiaXNzIjoiaHR0cHM6Ly9pc3N1ZXIuZXhhbXBsZSIsImNsaWVu"
+        + "dF9pZCI6ImNsaWVudC1yczI1NiIsInRva2VuX3VzZSI6ImFjY2VzcyIsImV4cCI6"
+        + "NDEwMjQ0NDgwMCwiaWF0IjoxNzAwMDAwMDAwLCJ1c2VybmFtZSI6InJvc2EifQ.Q"
+        + "xbsca5oO0s7sda3NpDDz_FTVJZzILV7F5LVcfogyP2bFCR_rTvKr7NR1HJmT9CDS"
+        + "HyBzBwYWXjDK1nrbBfpC1SqSYYURQt3D-8i7R0AWEi2YARC2YxUH7Hx1TgZrU4bh"
+        + "JAdrHNJnjkFBZvcM31na93_mMNrU2WauSV3I3EzdxnQF1n5qczOdM2VdCXrKS3fK"
+        + "q0PZKKBltdn43mtV3BD0gbyZiCNe6khc37qtHX5e_GD6XYbUDX1DKPKyvsAAwe4j"
+        + "Cuj9_T0vgjEpefYz7VgV38Y6asF3h19kP0VZZCMqyO8IkjAsBMh_LwE-VcLbbJ4l"
+        + "yiE7Tw7Z_ubyFPcOGfDcg";
+    static String RS256_OTHER_KEY = "eyJhbGciOiJSUzI1NiIsImtpZCI6InJzYS0xIiwidHlwIjoiSldUIn0.eyJzdWIi"
+        + "OiJ1LXJzMjU2IiwiaXNzIjoiaHR0cHM6Ly9pc3N1ZXIuZXhhbXBsZSIsImNsaWVu"
+        + "dF9pZCI6ImNsaWVudC1yczI1NiIsInRva2VuX3VzZSI6ImFjY2VzcyIsImV4cCI6"
+        + "NDEwMjQ0NDgwMCwiaWF0IjoxNzAwMDAwMDAwLCJ1c2VybmFtZSI6InJvc2EifQ.E"
+        + "C_14d8p9-JML6ZZkR3eKkiBKpoH0kEwLcxPDid-FUYHn5kDL6asJWr3IhodVHzx9"
+        + "CtfIQ3P_VqzOMlolepTlfoWXx9QedwCBqAxLkMumyO9G_eS97_cbzAcMNEHBpWvu"
+        + "A3niUZbkPx8mnvI5ZKB6cVbt-8u95hd0UXVSp8llChOOoE_-4MqsnhNfiqul_SUW"
+        + "bJcwxitY75Jnw8lh-KBrY9Ow-TgyVeDQYpwk_ofUEuew3-duABJgRoep7qByLlWs"
+        + "HdTbetR9_udRSWbygIKBL18LGrINtF8I6sOcnq3S3ILS4O8UKCwpsV9jYLXSpeX1"
+        + "ZOFEn8B7hfAL0XLzm4INg";
+    static String RS256_UNKNOWN_KID = "eyJhbGciOiJSUzI1NiIsImtpZCI6InJzYS05IiwidHlwIjoiSldUIn0.eyJzdWIi"
+        + "OiJ1LXJzMjU2IiwiaXNzIjoiaHR0cHM6Ly9pc3N1ZXIuZXhhbXBsZSIsImNsaWVu"
+        + "dF9pZCI6ImNsaWVudC1yczI1NiIsInRva2VuX3VzZSI6ImFjY2VzcyIsImV4cCI6"
+        + "NDEwMjQ0NDgwMCwiaWF0IjoxNzAwMDAwMDAwLCJ1c2VybmFtZSI6InJvc2EifQ.v"
+        + "RD8ctulqrjk3AKgTYIJQYPD7OxOETk5jq-qukq2KrjoDye9tSkLR1HyeICbPWRlB"
+        + "dTiQ7JGp4v1iAsJQfg73MgeTPRLX7ibWoBAwuVaivnhgEyKmJTVdp21mpUKfYM7i"
+        + "EvkNs6fem4yscUtR5j7V9Zl3Fl5RLzn6RFEPJiO1if0vw9rgWxTCGrtaXwwhllur"
+        + "dtUAc5OFtZCKSgsa7-bjAI7UeVzD6bhxItneqE-k_6ELOt2uJEP9r9h814cyLG1C"
+        + "UAJY_d7t2REHVC-mc81-JFqNYyroYO_5ZR5OB585xzlJvmt7wIkw2pVC1KHq7zF-"
+        + "ok3bSJKm8pGlTCR2rmWtA";
+
+    public TokenAlgorithmTest() { return; }
+
+    static #String pw() {
+        String p = "Xq7#correct-horse";
+        return #p;
+    }
+
+    /** A pool with one signed-in user; the access token. */
+    static #String signedIn(MemoryUserPool p, String name) {
+        RegistrationResult reg #= p.register(name, TokenAlgorithmTest.pw());
+        String sub #= reg.subject();
+        String code #= p.hooks().lastConfirmationCode(sub);
+        p.confirm(name, code);
+        SignInResult r #= p.authenticator().signIn(name, TokenAlgorithmTest.pw());
+        Tokens t = r.tokens();
+        return t.accessToken();
+    }
+
+    static boolean failsCheck(TokenVerifier v, String token, String check) {
+        try {
+            Claims c #= v.verify(token, TokenUse.ACCESS());
+        } catch (IdentityException e) {
+            return e.kind() == IdentityException.INVALID_TOKEN()
+                && e.message.contains(check);
+        }
+        return false;
+    }
+
+    // 7.3: the header names ES256 and the JWKS's kid, the JWKS holds a public
+    // EC key and nothing secret, and the verifier accepts the token.
+    @Test
+    public void memoryTokensAreEs256AndVerify() {
+        ManualTimeSource clock = heap ManualTimeSource(1700000000L);
+        MemoryUserPool p #= MemoryUserPool.withClock(clock);
+        String access #= TokenAlgorithmTest.signedIn(p, "ada");
+        Jwks keys #= p.verifier().jwks();
+        String doc #= keys.json();
+        String header #= TestJwt.header(access);
+        Assert.isTrue(header.contains("\"alg\":\"ES256\""));
+        Assert.isTrue(header.contains("\"kid\":\"" + TestJwt.jwksMember(doc, "kid") + "\""));
+        Assert.isTrue(TestJwt.jwksMember(doc, "kty").equals("EC"));
+        Assert.isTrue(TestJwt.jwksMember(doc, "d").byteLength() == 0);
+        Claims c #= p.verifier().verify(access, TokenUse.ACCESS());
+        Assert.isTrue(c.username().equals("ada"));
+    }
+
+    // 7.2: an HS256 token with the pool's claims is refused by its algorithm.
+    @Test
+    public void hs256IsRefused() {
+        ManualTimeSource clock = heap ManualTimeSource(1700000000L);
+        MemoryUserPool p #= MemoryUserPool.withClock(clock);
+        String access #= TokenAlgorithmTest.signedIn(p, "bob");
+        String h #= TestJwt.header(access);
+        String hs #= h.replace("\"alg\":\"ES256\"", "\"alg\":\"HS256\"");
+        int8[] key #= SecureRandom.bytes(32L);
+        String forged #= TestJwt.signHs256(hs, TestJwt.payload(access), key, 32L);
+        Assert.isTrue(TokenAlgorithmTest.failsCheck(p.verifier(), forged, "algorithm"));
+    }
+
+    // A token signed by a key the JWKS does not hold fails the signature check,
+    // and so does one naming a kid the JWKS does not hold.
+    @Test
+    public void foreignKeyAndUnknownKidAreRefused() {
+        ManualTimeSource clock = heap ManualTimeSource(1700000000L);
+        MemoryUserPool p #= MemoryUserPool.withClock(clock);
+        String access #= TokenAlgorithmTest.signedIn(p, "cy");
+        EcKeyPair other #= EcKeyPair.generateP256();
+        String foreign #= TestJwt.signEs256(TestJwt.header(access), TestJwt.payload(access), other);
+        Assert.isTrue(TokenAlgorithmTest.failsCheck(p.verifier(), foreign, "signature"));
+
+        Jwks keys #= p.verifier().jwks();
+        String doc #= keys.json();
+        String kid #= TestJwt.jwksMember(doc, "kid");
+        String h #= TestJwt.header(access);
+        String otherKid #= h.replace("\"kid\":\"" + kid + "\"", "\"kid\":\"nope\"");
+        String renamed #= p.hooks().signedToken(otherKid, TestJwt.payload(access));
+        Assert.isTrue(TokenAlgorithmTest.failsCheck(p.verifier(), renamed, "signature"));
+    }
+
+    // 7.1: an RS256 token verifies over the JWKS that holds its kid; the same
+    // claims under another key, or naming a kid the JWKS lacks, do not.
+    @Test
+    public void rs256VerifiesOverItsJwks() {
+        Jwks keys = heap Jwks(TokenAlgorithmTest.RS256_JWKS);
+        DecodedJwt good #= Jwt.decode(TokenAlgorithmTest.RS256_GOOD, "test", "verify");
+        Assert.isTrue(good.verifiedBy(keys));
+        Claims c #= good.claims();
+        Assert.isTrue(c.subject().equals("u-rs256"));
+        DecodedJwt otherKey #= Jwt.decode(TokenAlgorithmTest.RS256_OTHER_KEY, "test", "verify");
+        Assert.isFalse(otherKey.verifiedBy(keys));
+        DecodedJwt unknownKid #= Jwt.decode(TokenAlgorithmTest.RS256_UNKNOWN_KID, "test", "verify");
+        Assert.isFalse(unknownKid.verifiedBy(keys));
+    }
+}

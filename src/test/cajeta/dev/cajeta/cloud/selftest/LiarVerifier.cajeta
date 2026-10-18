@@ -1,7 +1,7 @@
 package dev.cajeta.cloud.selftest;
 
 import cajeta.codec.Base64;
-import cajeta.hash.SecureRandom;
+import dev.cajeta.crypto.SecureRandom;
 import cajeta.lang.String;
 import dev.cajeta.cloud.identity.Claims;
 import dev.cajeta.cloud.identity.DecodedJwt;

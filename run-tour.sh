@@ -52,10 +52,15 @@ cajeta_artifact_path() {
 echo ">> building dev.cajeta.cloud"
 "$CAJETA" build >/dev/null
 art="$(cajeta_artifact_path "$here" dev.cajeta.cloud)"
+# `cajeta build` resolved dev.cajeta.crypto into the store at the pin.
+crypto_ver="$(sed -n 's/.*"dev\.cajeta\.crypto"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' \
+    "$here/cajeta.json" | head -1)"
+crypto="${CRYPTO_CJA:-${OLLA_HOME:-$HOME/.olla}/dev.cajeta.crypto/$crypto_ver/dev.cajeta.crypto-$crypto_ver.cja}"
+[[ -f "$crypto" ]] || { echo "crypto archive not found: $crypto" >&2; exit 1; }
 
 echo ">> compiling the tour"
 mkdir -p build/tour
-"$CAJETA" --emit=exe --classpath="$art" \
+"$CAJETA" --emit=exe --classpath="$art,$crypto" \
     -o build/tour/cloud-tour \
     dev.cajeta.cloud.tour.Tour.main "$here/tour/src" build/tour >/dev/null
 

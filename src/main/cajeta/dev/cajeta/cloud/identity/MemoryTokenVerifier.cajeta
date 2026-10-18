@@ -4,9 +4,10 @@ import cajeta.concurrent.LockGuard;
 import cajeta.lang.String;
 
 /**
- * The memory driver's verifier (identity spec §5.3, §5.5): HS256 under
- * the pool's per-process key, which {@link #jwks} publishes so a test
- * can verify the same tokens without this class (§10.4).
+ * The memory driver's verifier (identity spec §5.3, §5.5): ES256 under
+ * the pool's per-process P-256 pair, whose public half {@link #jwks}
+ * publishes so a test can verify the same tokens without this class
+ * (§10.4, cajeta-crypto spec §7.3).
  */
 public final class MemoryTokenVerifier implements TokenVerifier {
 

@@ -78,7 +78,7 @@ env:
   #
   # Raised to v0.39.0 for the fleet republish.
   # Raised to v0.41.0 with identity selection (identity plan Unit 2).
-  CAJETA_VERSION: v0.42.1
+  CAJETA_VERSION: v0.43.1
 
 jobs:
   build-test:

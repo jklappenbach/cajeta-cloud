@@ -56,6 +56,16 @@ public final class MemoryIdentityHooks implements IdentityHooks {
         return;
     }
 
+    /**
+     * `header.payload` signed ES256 under the pool's own key, so a test can
+     * present a validly signed token whose claims or `kid` are wrong. The
+     * private key never leaves the driver.
+     */
+    public #String signedToken(String headerJson, String payloadJson) {
+        LockGuard g #= this.st.lock.acquire();
+        return Jwt.signEs256(headerJson, payloadJson, this.st.key);
+    }
+
     /** Make the next sign-in fail with password-reset-required (§15.9). */
     public void requirePasswordReset(String subject) {
         LockGuard g #= this.st.lock.acquire();

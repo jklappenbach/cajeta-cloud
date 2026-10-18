@@ -2,7 +2,7 @@ package dev.cajeta.cloud.selftest;
 
 import cajeta.codec.Base32;
 import cajeta.collection.ArrayList;
-import cajeta.hash.Totp;
+import dev.cajeta.crypto.Totp;
 import cajeta.lang.String;
 import dev.cajeta.unit.Assert;
 import dev.cajeta.cloud.Capabilities;
@@ -31,7 +31,7 @@ import dev.cajeta.cloud.identity.User;
 /**
  * cajeta-cloud-identity Unit 3 (plan 3.1.1 to 3.1.16 but 3.1.13, which is
  * the stdlib's): sign-in, lockout, refresh and sign-out, claims and their
- * verification, independent HS256 verification over the JWKS, PBKDF2
+ * verification, independent ES256 verification over the JWKS, PBKDF2
  * records, TOTP, SMS and email codes, redaction, capabilities,
  * passwordless access, code lockout, hidden user existence and the
  * self-service plane. Every case runs the memory driver on a manual
@@ -304,16 +304,11 @@ public class AuthenticationTest {
             TokenUse.ACCESS(), "signature"));
 
         // Validly signed, with the wrong issuer, then the wrong audience.
-        Jwks keys #= v.jwks();
-        String doc #= keys.json();
-        int8[] key #= TestJwt.jwksKey(doc);
-        int64 keyLen = (int64) key.count();
-        String badIss #= TestJwt.forge(access, "\"iss\":\"", "\"iss\":\"evil-",
-            key, keyLen);
+        String badIss #= TestJwt.forge(p, access, "\"iss\":\"", "\"iss\":\"evil-");
         Assert.isTrue(AuthenticationTest.failsCheck(v, badIss,
             TokenUse.ACCESS(), "issuer"));
-        String badAud #= TestJwt.forge(access, "\"client_id\":\"",
-            "\"client_id\":\"evil-", key, keyLen);
+        String badAud #= TestJwt.forge(p, access, "\"client_id\":\"",
+            "\"client_id\":\"evil-");
         Assert.isTrue(AuthenticationTest.failsCheck(v, badAud,
             TokenUse.ACCESS(), "audience"));
         Assert.isTrue(AuthenticationTest.failsCheck(v, access,
@@ -340,26 +335,26 @@ public class AuthenticationTest {
         String idt #= t.idToken();
         Jwks keys #= p.verifier().jwks();
         String doc #= keys.json();
-        Assert.isTrue(TestJwt.jwksMember(doc, "kty").equals("oct"));
-        Assert.isTrue(TestJwt.jwksMember(doc, "alg").equals("HS256"));
+        Assert.isTrue(TestJwt.jwksMember(doc, "kty").equals("EC"));
+        Assert.isTrue(TestJwt.jwksMember(doc, "crv").equals("P-256"));
+        Assert.isTrue(TestJwt.jwksMember(doc, "alg").equals("ES256"));
+        Assert.isTrue(TestJwt.jwksMember(doc, "d").byteLength() == 0);
+        Assert.isTrue(TestJwt.jwksMember(doc, "k").byteLength() == 0);
         String kid #= TestJwt.jwksMember(doc, "kid");
         Assert.isTrue(kid.byteLength() > 0);
-        int8[] key #= TestJwt.jwksKey(doc);
-        int64 keyLen = (int64) key.count();
-        Assert.isTrue(keyLen >= 32L);
-        Assert.isTrue(TestJwt.verify(access, key, keyLen));
-        Assert.isTrue(TestJwt.verify(idt, key, keyLen));
+        Assert.isTrue(TestJwt.verify(access, doc));
+        Assert.isTrue(TestJwt.verify(idt, doc));
         String header #= TestJwt.header(access);
-        Assert.isTrue(header.contains("\"alg\":\"HS256\""));
+        Assert.isTrue(header.contains("\"alg\":\"ES256\""));
         Assert.isTrue(header.contains("\"kid\":\"" + kid + "\""));
         String payload #= TestJwt.payload(access);
         Assert.isTrue(payload.contains("\"sub\":\"" + sub + "\""));
-        String forged #= TestJwt.forge(access, "\"username\":\"eve\"",
-            "\"username\":\"root\"", key, keyLen);
-        Assert.isTrue(TestJwt.verify(forged, key, keyLen));
+        String forged #= TestJwt.forge(p, access, "\"username\":\"eve\"",
+            "\"username\":\"root\"");
+        Assert.isTrue(TestJwt.verify(forged, doc));
         String spliced #= TestJwt.segment(forged, 0) + "."
             + TestJwt.segment(forged, 1) + "." + TestJwt.segment(access, 2);
-        Assert.isFalse(TestJwt.verify(spliced, key, keyLen));
+        Assert.isFalse(TestJwt.verify(spliced, doc));
     }
 
     // --- 3.1.7 --------------------------------------------------------

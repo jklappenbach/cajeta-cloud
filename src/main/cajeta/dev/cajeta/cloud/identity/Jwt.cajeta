@@ -5,15 +5,15 @@ import cajeta.codec.Base64Exception;
 import cajeta.codec.json.Json;
 import cajeta.codec.json.JsonParseException;
 import cajeta.codec.json.JsonValue;
-import cajeta.hash.HmacSha256;
 import cajeta.lang.String;
+import dev.cajeta.crypto.sig.EcKeyPair;
 
 /**
  * The port's JWT codec (identity spec §5, plan 3.2.3): compact
- * serialization, base64url segments, HS256 signing, and claims. Verifiers
- * against the memory driver and against adapters share it. RS256 and
- * ES256 are recognized and refused by name until the stdlib can verify
- * them (§5.6, §15.15). Nothing here ever puts a token, a key or a
+ * serialization, base64url segments, ES256 signing, and claims. Verifiers
+ * against the memory driver and against adapters share it, and check
+ * RS256 and ES256 over a JWKS with dev.cajeta.crypto (cajeta-crypto spec
+ * §7). HS256 is refused. Nothing here ever puts a token, a key or a
  * signature into a message.
  */
 public final class Jwt {
@@ -163,16 +163,19 @@ public final class Jwt {
         return Base64.encodeUrlSafe(b, (int64) text.byteLength());
     }
 
-    /** `header.payload.signature` signed with HS256 under `key`, the header naming `kid`. */
-    public static #String encodeHs256(String kid, String payloadJson,
-                                      int8[] key, int64 keyLen) {
-        String header #= "{\"alg\":\"HS256\",\"typ\":\"JWT\",\"kid\":"
+    /** `header.payload.signature` signed with ES256 under `pair`, the header naming `kid`. */
+    public static #String encodeEs256(String kid, String payloadJson, EcKeyPair pair) {
+        String header #= "{\"alg\":\"ES256\",\"typ\":\"JWT\",\"kid\":"
             + Jwt.quote(kid) + "}";
-        String input #= Jwt.segment(header) + "." + Jwt.segment(payloadJson);
+        return Jwt.signEs256(header, payloadJson, pair);
+    }
+
+    /** An ES256 signature under `pair` over any header and payload (the memory driver's test seam). */
+    static #String signEs256(String headerJson, String payloadJson, EcKeyPair pair) {
+        String input #= Jwt.segment(headerJson) + "." + Jwt.segment(payloadJson);
         int8[] in #= input.toBytes();
-        int8[] mac #= HmacSha256.mac(key, keyLen, in,
-            (int64) input.byteLength());
-        String out #= input + "." + Base64.encodeUrlSafe(mac, 32L);
+        int8[] sig #= pair.sign(in, (int64) input.byteLength());
+        String out #= input + "." + Base64.encodeUrlSafe(sig, 64L);
         return #out;
     }
 

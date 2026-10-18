@@ -72,8 +72,9 @@ is available only through the hooks: `lastConfirmationCode(subject)`,
 `lastSignInCode(subject)`, `lastPasswordResetCode(subject)`. Passwords are
 stored as `pbkdf2-sha256$600000$<salt>$<hash>`;
 `pool.hooks().passwordRecord(subject)` exposes the record so a test can
-assert the tag. Tokens are HS256 under a per-pool key the JWKS publishes,
-so it is for tests and development only. Five wrong passwords or codes lock
+assert the tag. Tokens are ES256 under a per-pool P-256 pair whose public
+half the JWKS publishes; the pair dies with the process, so it is for tests
+and development only. Verifiers accept RS256 and ES256 and refuse HS256. Five wrong passwords or codes lock
 the account with backoff from thirty seconds to fifteen minutes. TOTP seeds
 live in process memory. Build it with `MemoryUserPool.withClock(clock)` and a
 `ManualTimeSource` to move time in a test; `requireTotp(true)` makes every
