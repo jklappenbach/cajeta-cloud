@@ -86,7 +86,11 @@
             // Unit 2): 48 passed, 0 failed, 2 skipped, and the six selection
             // fixtures, on the released binary 2026-10-13. Raised to v0.43.1
             // with dev.cajeta.crypto 0.1.0, whose archive that release built.
-            "version": "0.43.1"
+            //
+            // Raised to v0.44.0, the first release without the stdlib crypto:
+            // 75 passed, 0 failed, 2 skipped, and the provider-selection gate,
+            // on the released binary 2026-10-19 (cajeta-crypto plan Unit 8).
+            "version": "0.44.0"
         },
 
         // THE load-bearing line (§14.11, amended 2026-10-13): no filesystem,
