@@ -132,6 +132,18 @@ jobs:
           echo "artifact=$art" >> "$GITHUB_OUTPUT"
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
 
+      - name: Verify the skills are packed
+        run: |
+          set -euo pipefail
+          cja="${{ steps.build.outputs.artifact }}"
+          if ls skills/*.md >/dev/null 2>&1; then
+            if cajeta archive list "$cja" | grep -q "skills/index.json"; then
+              echo "skills packed: $(ls skills/*.md | wc -l) source(s)"
+            else
+              echo "::error::skills/ has skills but the .cja carries no skills/index.json"; exit 1
+            fi
+          fi
+
       - name: Upload .cja as a build artifact
         uses: actions/upload-artifact@v4
         with:
