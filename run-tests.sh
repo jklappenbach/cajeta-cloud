@@ -172,9 +172,6 @@ echo ">> building + running the test binary"
     -o "$out/ctests" \
     dev.cajeta.cloud.selftest.TestMain.run "$here/src/test/cajeta" "$out" >/dev/null
 
-"$out/ctests" \
-    dev.cajeta.cloud.selftest.TestMain.run "$here/src/test/cajeta" "$out" >/dev/null
-
 "$out/ctests"
 
 # --- identity selection (cajeta-cloud-identity Unit 2) ------------------

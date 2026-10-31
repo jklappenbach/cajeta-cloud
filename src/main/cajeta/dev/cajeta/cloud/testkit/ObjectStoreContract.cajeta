@@ -44,6 +44,12 @@ public final class ObjectStoreContract {
         return s.toBytes();
     }
 
+    static #int8[] filled(int64 n, int8 value) {
+        int8[] b = heap int8[n];
+        for (int64 i = 0L; i < n; i++) b[i] = value;
+        return #b;
+    }
+
     static #String textOf(int8[] b) {
         int8[] copy = heap int8[(int64) b.count()];
         int64 i = 0;
@@ -240,18 +246,23 @@ public final class ObjectStoreContract {
                 "beginMultipart without the capability must fail cleanly");
             return;
         }
+        // Every part but the last is 5 MiB: the floor S3 and every
+        // S3-compatible service enforce (EntityTooSmall below it), so the
+        // check holds against a real bucket, not only a permissive fake.
         MultipartUpload up #= s.beginMultipart(prefix + "mp", "t");
         int8[] p2 #= ObjectStoreContract.bytesOf("-beta");
-        int8[] p1 #= ObjectStoreContract.bytesOf("alpha");
+        int8[] p1 #= ObjectStoreContract.filled(5242880L, (int8) 97);
         up.addPart(2, p2);
         up.addPart(1, p1);
         ObjectStoreContract.check(!s.stat(prefix + "mp").exists,
             "multipart-invisible",
             "an incomplete upload must never be readable (§8.2)");
         String etag #= up.complete();
+        int8[] joined #= s.get(prefix + "mp");
         ObjectStoreContract.check(
-            ObjectStoreContract.textOf(s.get(prefix + "mp"))
-                .equals("alpha-beta"),
+            (int64) joined.count() == 5242885L
+                && joined[0L] == (int8) 97 && joined[5242879L] == (int8) 97
+                && joined[5242880L] == (int8) 45 && joined[5242884L] == (int8) 97,
             "multipart-order", "parts must assemble in part-number order");
         MultipartUpload up2 #= s.beginMultipart(prefix + "mp2", "t");
         up2.addPart(1, p1);

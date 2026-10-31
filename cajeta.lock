@@ -1,0 +1,32 @@
+{
+  "generator": {
+    "tool": "cajeta",
+    "version": "0.48.0"
+  },
+  "lockfile-version": 1,
+  "manifest-checksum": "sha256:c6ba7b88ac7cdef1fa210a5964a6a3321aaca3811d205ff934ed87d8a1a10487",
+  "melts": [],
+  "overrides": [],
+  "packages": [
+    {
+      "checksum": "sha256:cc35bfd4e17d11893eeaae5665cf378443529144b5039aaf6dc86b62a86944f1",
+      "name": "dev.cajeta.crypto",
+      "provided-by": "explicit",
+      "resolved-from": "olla",
+      "version": "0.1.0"
+    }
+  ],
+  "plugins": [],
+  "properties": {
+    "cajeta.version": "0.48.0",
+    "details.group": "dev.cajeta",
+    "details.library": "cloud",
+    "details.name": "dev.cajeta.cloud",
+    "details.version": "0.5.0",
+    "flavor": "",
+    "profile": "",
+    "target": "",
+    "workspace.root": ""
+  },
+  "resolved-at": "2026-10-31T03:02:50Z"
+}
