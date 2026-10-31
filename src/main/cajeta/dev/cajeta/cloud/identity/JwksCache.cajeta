@@ -1,0 +1,102 @@
+package dev.cajeta.cloud.identity;
+
+import cajeta.codec.json.Json;
+import cajeta.codec.json.JsonArray;
+import cajeta.codec.json.JsonParseException;
+import cajeta.codec.json.JsonValue;
+import cajeta.concurrent.Lock;
+import cajeta.concurrent.LockGuard;
+import cajeta.lang.String;
+
+/**
+ * The one copy of the signing-key cache every verifier follows (identity
+ * spec §14.4): the key set is fetched when nothing is cached or the cached
+ * document's lifetime has passed (its Cache-Control max-age, an hour when it
+ * names none); an unknown `kid` refetches once, since providers rotate keys,
+ * then costs no fetch for a minute, so a stream of forged tokens cannot
+ * drive one fetch each. One lock serializes it.
+ */
+public final class JwksCache {
+    private static final int64 DEFAULT_MAX_AGE = 3600L;
+    private static final int64 MISS_COOLDOWN = 60L;
+
+    JwksSource source;
+    TimeSource clock;
+    Lock lock;
+    String keysDoc;
+    int64 keysExpireAt;
+    int64 lastMissFetch;
+    boolean missFetched;
+
+    public JwksCache(JwksSource source, TimeSource clock) {
+        this.source #= source;
+        this.clock #= clock;
+        this.lock = heap Lock();
+        this.keysDoc = null;
+        this.keysExpireAt = 0L;
+        this.lastMissFetch = 0L;
+        this.missFetched = false;
+        return;
+    }
+
+    /** The current key set, fetched or refreshed as needed. */
+    public #Jwks keys() {
+        LockGuard g #= this.lock.acquire();
+        this.ensureFresh();
+        return heap Jwks(this.keysDoc);
+    }
+
+    /**
+     * True when the current set holds `kid`; an unknown kid refetches once
+     * (then not again within a minute) before answering false.
+     */
+    public boolean has(String kid) {
+        LockGuard g #= this.lock.acquire();
+        this.ensureFresh();
+        if (this.holds(kid)) return true;
+        int64 now = this.clock.nowSeconds();
+        if (!this.missFetched || now - this.lastMissFetch >= JwksCache.MISS_COOLDOWN) {
+            this.missFetched = true;
+            this.lastMissFetch = now;
+            this.refresh();
+            return this.holds(kid);
+        }
+        return false;
+    }
+
+    private void ensureFresh() {
+        if (this.keysDoc == null || this.clock.nowSeconds() >= this.keysExpireAt) {
+            this.refresh();
+        }
+    }
+
+    private void refresh() {
+        JwksDocument doc #= this.source.fetch();
+        this.keysDoc #= doc.json();
+        int64 age = doc.maxAge();
+        if (age < 0L) age = JwksCache.DEFAULT_MAX_AGE;
+        this.keysExpireAt = this.clock.nowSeconds() + age;
+    }
+
+    private boolean holds(String kid) {
+        if (this.keysDoc == null || kid.byteLength() == 0) return false;
+        try {
+            JsonValue root #= Json.parse(this.keysDoc);
+            if (root.kind() != JsonValue.OBJECT) return false;
+            JsonValue list = root.object().get("keys");
+            if (list == null || list.kind() != JsonValue.ARRAY) return false;
+            JsonArray arr = list.array();
+            for (int32 i = 0; i < arr.count(); i++) {
+                JsonValue k = arr.get(i);
+                if (k.kind() != JsonValue.OBJECT) continue;
+                JsonValue id = k.object().get("kid");
+                if (id == null || id.kind() != JsonValue.STRING) continue;
+                String s #= id.asString();
+                if (s.equals(kid)) return true;
+            }
+        } catch (JsonParseException e) {
+            return false;
+        }
+        return false;
+    }
+}

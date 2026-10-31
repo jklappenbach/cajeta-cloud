@@ -1,0 +1,35 @@
+package dev.cajeta.cloud.selftest;
+
+import cajeta.collection.ArrayList;
+import cajeta.lang.String;
+import dev.cajeta.cloud.identity.JwksDocument;
+import dev.cajeta.cloud.identity.JwksSource;
+
+/** A JwksSource serving documents in order, repeating the last, counting fetches. */
+public final class FixtureJwksSource implements JwksSource {
+    ArrayList<String> docs;
+    int64 maxAgeSecs;
+    int32 served;
+
+    public FixtureJwksSource(int64 maxAge) {
+        this.docs = heap ArrayList<String>();
+        this.maxAgeSecs = maxAge;
+        this.served = 0;
+        return;
+    }
+
+    public void then(String json) {
+        String c = "" + json;
+        this.docs.add(#c);
+        return;
+    }
+
+    public int32 fetches() { return this.served; }
+
+    public #JwksDocument fetch() {
+        int32 i = this.served;
+        if (i >= this.docs.count()) i = this.docs.count() - 1;
+        this.served = this.served + 1;
+        return heap JwksDocument(this.docs.get(i), this.maxAgeSecs);
+    }
+}

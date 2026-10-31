@@ -1,0 +1,102 @@
+package dev.cajeta.cloud.selftest;
+
+import cajeta.lang.String;
+import dev.cajeta.unit.Assert;
+import dev.cajeta.cloud.identity.Jwks;
+import dev.cajeta.cloud.identity.JwksCache;
+import dev.cajeta.cloud.identity.JwksDocument;
+import dev.cajeta.cloud.identity.ManualTimeSource;
+
+/**
+ * The shared JWKS cache (identity spec §14.4, cloudflare spec 4.2): one copy
+ * of the rule every verifier follows. A key set is fetched when nothing is
+ * cached or the cached document's lifetime has passed; an unknown `kid`
+ * refetches once, then costs no fetch for a minute, so a stream of forged
+ * tokens cannot drive one fetch each. The document's lifetime is its
+ * Cache-Control max-age, an hour when it names none.
+ */
+public class JwksCacheTest {
+    private static final String ONE = "{\"keys\":[{\"kid\":\"k1\",\"kty\":\"RSA\"}]}";
+    private static final String TWO = "{\"keys\":[{\"kid\":\"k1\",\"kty\":\"RSA\"},{\"kid\":\"k2\",\"kty\":\"RSA\"}]}";
+
+    public JwksCacheTest() {
+        return;
+    }
+
+    @Test
+    public void theFirstUseFetchesAndTheLifetimeIsHonoured() {
+        FixtureJwksSource src = heap FixtureJwksSource(300L);
+        src.then(JwksCacheTest.ONE);
+        ManualTimeSource clock = heap ManualTimeSource(1000L);
+        JwksCache cache = heap JwksCache(src, clock);
+        Assert.isTrue(src.fetches() == 0);
+        Assert.isTrue(cache.has("k1"));
+        Assert.isTrue(cache.has("k1"));
+        Assert.isTrue(src.fetches() == 1);
+        Jwks keys #= cache.keys();
+        String json #= keys.json();
+        Assert.isTrue(json.indexOf("k1") >= 0L);
+        Assert.isTrue(src.fetches() == 1);
+        clock.advance(300L);
+        Assert.isTrue(cache.has("k1"));
+        Assert.isTrue(src.fetches() == 2);
+        return;
+    }
+
+    @Test
+    public void anUnknownKidRefetchesOnceThenWaitsAMinute() {
+        FixtureJwksSource src = heap FixtureJwksSource(3600L);
+        src.then(JwksCacheTest.ONE);
+        ManualTimeSource clock = heap ManualTimeSource(1000L);
+        JwksCache cache = heap JwksCache(src, clock);
+        Assert.isFalse(cache.has("k2"));
+        Assert.isTrue(src.fetches() == 2);
+        Assert.isFalse(cache.has("k2"));
+        Assert.isTrue(src.fetches() == 2);
+        clock.advance(61L);
+        Assert.isFalse(cache.has("k2"));
+        Assert.isTrue(src.fetches() == 3);
+        Assert.isFalse(cache.has(""));
+        return;
+    }
+
+    @Test
+    public void aRotatedKeyIsFoundByTheRefetch() {
+        FixtureJwksSource src = heap FixtureJwksSource(3600L);
+        src.then(JwksCacheTest.ONE);
+        src.then(JwksCacheTest.TWO);
+        ManualTimeSource clock = heap ManualTimeSource(1000L);
+        JwksCache cache = heap JwksCache(src, clock);
+        Assert.isTrue(cache.has("k1"));
+        Assert.isTrue(cache.has("k2"));
+        Assert.isTrue(src.fetches() == 2);
+        return;
+    }
+
+    @Test
+    public void aDocumentWithoutALifetimeLivesAnHour() {
+        FixtureJwksSource src = heap FixtureJwksSource(-1L);
+        src.then(JwksCacheTest.ONE);
+        ManualTimeSource clock = heap ManualTimeSource(1000L);
+        JwksCache cache = heap JwksCache(src, clock);
+        Assert.isTrue(cache.has("k1"));
+        clock.advance(3599L);
+        Assert.isTrue(cache.has("k1"));
+        Assert.isTrue(src.fetches() == 1);
+        clock.advance(1L);
+        Assert.isTrue(cache.has("k1"));
+        Assert.isTrue(src.fetches() == 2);
+        return;
+    }
+
+    @Test
+    public void cacheControlMaxAgeIsRead() {
+        Assert.isTrue(JwksDocument.maxAgeOf("public, max-age=86400, must-revalidate") == 86400L);
+        Assert.isTrue(JwksDocument.maxAgeOf("max-age=0") == 0L);
+        Assert.isTrue(JwksDocument.maxAgeOf("no-store") == 0L);
+        Assert.isTrue(JwksDocument.maxAgeOf("no-cache, max-age=60") == 0L);
+        Assert.isTrue(JwksDocument.maxAgeOf("public") == -1L);
+        Assert.isTrue(JwksDocument.maxAgeOf(null) == -1L);
+        return;
+    }
+}

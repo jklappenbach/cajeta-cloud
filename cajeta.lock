@@ -4,7 +4,7 @@
     "version": "0.48.0"
   },
   "lockfile-version": 1,
-  "manifest-checksum": "sha256:c6ba7b88ac7cdef1fa210a5964a6a3321aaca3811d205ff934ed87d8a1a10487",
+  "manifest-checksum": "sha256:98a772395367b4e09c99b98cfca652096d7c3ba1a1fcc11a38954ea30bc046fa",
   "melts": [],
   "overrides": [],
   "packages": [
@@ -22,11 +22,11 @@
     "details.group": "dev.cajeta",
     "details.library": "cloud",
     "details.name": "dev.cajeta.cloud",
-    "details.version": "0.5.0",
+    "details.version": "0.5.1",
     "flavor": "",
     "profile": "",
     "target": "",
     "workspace.root": ""
   },
-  "resolved-at": "2026-10-31T03:02:50Z"
+  "resolved-at": "2026-10-31T07:58:13Z"
 }

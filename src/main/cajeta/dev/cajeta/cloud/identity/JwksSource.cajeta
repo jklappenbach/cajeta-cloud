@@ -1,0 +1,10 @@
+package dev.cajeta.cloud.identity;
+
+/**
+ * Where a verifier's signing keys come from: a provider's HTTP fetch of its
+ * JWKS or certificate endpoint, or a test's fixtures. The [[JwksCache]]
+ * decides when to call it.
+ */
+public interface JwksSource {
+    #JwksDocument fetch();
+}

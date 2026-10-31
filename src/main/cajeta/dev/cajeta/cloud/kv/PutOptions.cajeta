@@ -24,6 +24,10 @@ public final class PutOptions {
     public void timeToLive(int64 seconds) { this.ttl = seconds; this.expires = 0L; return; }
 
     public String metadata() { return this.meta; }
+    /** The time to live set, or 0 when an absolute expiry or none was. */
+    public int64 ttlSeconds() { return this.ttl; }
+    /** The absolute expiry set, or 0 when a time to live or none was. */
+    public int64 expiryEpochSeconds() { return this.expires; }
     /** The absolute expiry for a write made at `now`, or 0 for none. */
     public int64 expiryAt(int64 now) {
         if (this.expires > 0L) return this.expires;
