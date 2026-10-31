@@ -26,4 +26,21 @@ public final class Caps {
     public static #String LOG_COMPACTION()        { String s = "stream.log-compaction";        return #s; }
     public static #String TRANSACTIONAL_PRODUCE() { String s = "stream.transactional-produce"; return #s; }
     public static #String CONSUMER_GROUPS()       { String s = "stream.consumer-groups";       return #s; }
+
+    // Queue (cajeta-cloud-cloudflare spec 5.1). Delivery is at least once and
+    // unordered unless a capability says more.
+    public static #String QUEUE_FIFO()                  { String s = "queue.fifo";                  return #s; }
+    public static #String QUEUE_EXACTLY_ONCE()          { String s = "queue.exactly-once";          return #s; }
+    public static #String QUEUE_MESSAGE_GROUPS()        { String s = "queue.message-groups";        return #s; }
+    public static #String QUEUE_DELAYED_SEND()          { String s = "queue.delayed-send";          return #s; }
+    public static #String QUEUE_DEAD_LETTER_REPORTING() { String s = "queue.dead-letter-reporting"; return #s; }
+
+    // Key-value (cajeta-cloud-cloudflare spec 6.1). Conditional writes and the
+    // consistency model are declared, never assumed: Workers KV has neither.
+    public static #String KV_CONDITIONAL_CREATE() { String s = "kv.conditional-create"; return #s; }
+    public static #String KV_COMPARE_AND_SET()    { String s = "kv.compare-and-set";    return #s; }
+    public static #String KV_STRONG_CONSISTENCY() { String s = "kv.strong-consistency"; return #s; }
+    public static #String KV_READ_YOUR_WRITES()   { String s = "kv.read-your-writes";   return #s; }
+    public static #String KV_EXPIRY()             { String s = "kv.expiry";             return #s; }
+    public static #String KV_METADATA()           { String s = "kv.metadata";           return #s; }
 }

@@ -1,0 +1,217 @@
+package dev.cajeta.cloud.kv;
+
+import cajeta.collection.ArrayList;
+import cajeta.concurrent.Lock;
+import cajeta.concurrent.LockGuard;
+import cajeta.lang.String;
+import dev.cajeta.cloud.Capabilities;
+import dev.cajeta.cloud.Caps;
+import dev.cajeta.cloud.CloudException;
+import dev.cajeta.cloud.CloudStats;
+import dev.cajeta.cloud.identity.TimeSource;
+
+/**
+ * The in-memory key-value driver (cloudflare spec 6.1.7): strongly consistent
+ * with conditional writes, expiry on an injected clock, and keys listed in
+ * byte order. `eventual(clock, lag)` makes every write (and delete) readable
+ * only `lag` seconds later, so code written against an eventually consistent
+ * store (Workers KV) can be tested for stale reads; conditional writes still
+ * decide on the latest state.
+ */
+public final class MemoryKeyValue implements KeyValueStore {
+    Lock lock;
+    ArrayList<String> keys;      // sorted, bytewise
+    ArrayList<KvRec> recs;       // parallel to keys
+    int64 seq;
+    int64 lag;
+    TimeSource clock;
+    Capabilities caps;
+    CloudStats statsObj;
+
+    public MemoryKeyValue(^TimeSource clock) {
+        this.setup(clock, 0L);
+        return;
+    }
+
+    /** A driver whose writes become readable `lagSeconds` after they are made. */
+    public static #MemoryKeyValue eventual(^TimeSource clock, int64 lagSeconds) {
+        MemoryKeyValue kv = heap MemoryKeyValue(clock);
+        kv.setup(clock, lagSeconds);
+        return #kv;
+    }
+
+    private void setup(^TimeSource clock, int64 lagSeconds) {
+        this.lock = heap Lock();
+        this.keys = heap ArrayList<String>();
+        this.recs = heap ArrayList<KvRec>();
+        this.seq = 0L;
+        this.lag = lagSeconds;
+        this.clock = clock;
+        this.statsObj = heap CloudStats();
+        Capabilities c = heap Capabilities("memory-kv");
+        c.declare(Caps.KV_CONDITIONAL_CREATE(), "");
+        c.declare(Caps.KV_COMPARE_AND_SET(), "versions are the driver's sequence");
+        c.declare(Caps.KV_EXPIRY(), "on the driver's clock");
+        c.declare(Caps.KV_METADATA(), "");
+        if (lagSeconds == 0L) {
+            c.declare(Caps.KV_STRONG_CONSISTENCY(), "");
+            c.declare(Caps.KV_READ_YOUR_WRITES(), "");
+        }
+        this.caps #= c;
+        return;
+    }
+
+    public Capabilities capabilities() { return this.caps; }
+    public CloudStats stats() { return this.statsObj; }
+    public int64 propagationBoundSeconds() { return this.lag; }
+
+    public void put(String key, int8[] value, PutOptions options) {
+        LockGuard g #= this.lock.acquire();
+        String v #= this.write(key, value, options);
+        return;
+    }
+
+    public #KvEntry get(String key) {
+        LockGuard g #= this.lock.acquire();
+        int64 now = this.clock.nowSeconds();
+        int32 at = this.indexOf(key);
+        if (at < 0) {
+            this.statsObj.recordCall(0L, 0L, 0L, false);
+            return null;
+        }
+        KvRec r = this.readable(this.recs.get(at), now);
+        if (r == null || !r.live(now)) {
+            this.statsObj.recordCall(0L, 0L, 0L, false);
+            return null;
+        }
+        int64 n = r.value.count();
+        int8[] copy = heap int8[n];
+        for (int64 i = 0L; i < n; i++) copy[i] = r.value[i];
+        this.statsObj.recordCall(0L, 0L, n, false);
+        return heap KvEntry(#copy, r.meta, r.version, r.expires);
+    }
+
+    public boolean delete(String key) {
+        LockGuard g #= this.lock.acquire();
+        int64 now = this.clock.nowSeconds();
+        int32 at = this.indexOf(key);
+        if (at < 0) return false;
+        KvRec cur = this.recs.get(at);
+        boolean existed = cur.live(now);
+        if (this.lag == 0L) {
+            String k #= this.keys.removeAt(at);
+            KvRec r #= this.recs.removeAt(at);
+        } else {
+            this.seq = this.seq + 1L;
+            String ver #= "v" + this.seq;
+            KvRec tomb = heap KvRec(null, "", #ver, 0L, now + this.lag);
+            tomb.prior #= this.readable(cur, now);
+            this.recs.set(at, #tomb);
+        }
+        this.statsObj.recordCall(0L, 0L, 0L, false);
+        return existed;
+    }
+
+    public #KvListPage list(String prefix, String cursor, int64 limit) {
+        LockGuard g #= this.lock.acquire();
+        int64 now = this.clock.nowSeconds();
+        ArrayList<String> page = heap ArrayList<String>();
+        String next #= "" + "";
+        for (int32 i = 0; i < this.keys.count(); i++) {
+            String k = this.keys.get(i);
+            if (!k.startsWith(prefix)) continue;
+            if (cursor.byteLength() > 0 && k.compareTo(cursor) <= 0) continue;
+            KvRec r = this.readable(this.recs.get(i), now);
+            if (r == null || !r.live(now)) continue;
+            if ((int64) page.count() == limit) {
+                next #= "" + page.get(page.count() - 1);
+                break;
+            }
+            String copy = "" + k;
+            page.add(#copy);
+        }
+        int32 n = page.count();
+        String[] out = heap String[(int64) n];
+        for (int32 i = 0; i < n; i++) out[i] #= "" + page.get(i);
+        return heap KvListPage(#out, #next);
+    }
+
+    public #KvCondResult putIfAbsent(String key, int8[] value, PutOptions options) {
+        this.caps.require(Caps.KV_CONDITIONAL_CREATE(), "putIfAbsent", key);
+        LockGuard g #= this.lock.acquire();
+        int64 now = this.clock.nowSeconds();
+        int32 at = this.indexOf(key);
+        if (at >= 0 && this.recs.get(at).live(now)) {
+            String cur = "" + this.recs.get(at).version;
+            return heap KvCondResult(false, #cur);
+        }
+        String v #= this.write(key, value, options);
+        return heap KvCondResult(true, #v);
+    }
+
+    public #KvCondResult compareAndSet(String key, String expectedVersion, int8[] value, PutOptions options) {
+        this.caps.require(Caps.KV_COMPARE_AND_SET(), "compareAndSet", key);
+        LockGuard g #= this.lock.acquire();
+        int64 now = this.clock.nowSeconds();
+        int32 at = this.indexOf(key);
+        if (at < 0 || !this.recs.get(at).live(now)) {
+            String none = "" + "";
+            return heap KvCondResult(false, #none);
+        }
+        if (!this.recs.get(at).version.equals(expectedVersion)) {
+            String cur = "" + this.recs.get(at).version;
+            return heap KvCondResult(false, #cur);
+        }
+        String v #= this.write(key, value, options);
+        return heap KvCondResult(true, #v);
+    }
+
+    // Under the lock: install a new state for `key`, returning its version.
+    private #String write(String key, int8[] value, PutOptions options) {
+        int64 now = this.clock.nowSeconds();
+        this.seq = this.seq + 1L;
+        String ver #= "v" + this.seq;
+        int64 n = value.count();
+        int8[] copy = heap int8[n];
+        for (int64 i = 0L; i < n; i++) copy[i] = value[i];
+        String stored #= "" + ver;
+        KvRec rec = heap KvRec(#copy, options.metadata(), #stored, options.expiryAt(now), now + this.lag);
+        int32 at = this.indexOf(key);
+        if (at >= 0) {
+            if (this.lag > 0L) rec.prior #= this.readable(this.recs.get(at), now);
+            this.recs.set(at, #rec);
+        } else {
+            int32 lo = 0;
+            int32 hi = this.keys.count();
+            while (lo < hi) {
+                int32 mid = (lo + hi) / 2;
+                if (this.keys.get(mid).compareTo(key) < 0) lo = mid + 1;
+                else hi = mid;
+            }
+            String k = "" + key;
+            this.keys.insert(lo, #k);
+            this.recs.insert(lo, #rec);
+        }
+        this.statsObj.recordCall(0L, n, 0L, false);
+        return #ver;
+    }
+
+    // The state a read at `now` sees: the current one once its time has come, else the prior.
+    private KvRec readable(KvRec cur, int64 now) {
+        if (cur.since <= now) return cur;
+        return cur.prior;
+    }
+
+    private int32 indexOf(String key) {
+        int32 lo = 0;
+        int32 hi = this.keys.count();
+        while (lo < hi) {
+            int32 mid = (lo + hi) / 2;
+            int32 c = this.keys.get(mid).compareTo(key);
+            if (c == 0) return mid;
+            if (c < 0) lo = mid + 1;
+            else hi = mid;
+        }
+        return -1;
+    }
+}

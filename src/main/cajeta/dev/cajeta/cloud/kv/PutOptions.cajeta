@@ -1,0 +1,33 @@
+package dev.cajeta.cloud.kv;
+
+import cajeta.lang.String;
+
+/**
+ * What goes with a value (cloudflare spec 6.1.1): metadata (a string the
+ * provider stores beside the value; "" for none) and an expiry, absolute in
+ * seconds since the epoch or as a time to live. Unset means no expiry.
+ */
+public final class PutOptions {
+    String meta;
+    int64 expires;
+    int64 ttl;
+
+    public PutOptions() {
+        this.meta = "";
+        this.expires = 0L;
+        this.ttl = 0L;
+        return;
+    }
+
+    public void metadata(String metadata) { this.meta = "" + metadata; return; }
+    public void expiresAt(int64 epochSeconds) { this.expires = epochSeconds; this.ttl = 0L; return; }
+    public void timeToLive(int64 seconds) { this.ttl = seconds; this.expires = 0L; return; }
+
+    public String metadata() { return this.meta; }
+    /** The absolute expiry for a write made at `now`, or 0 for none. */
+    public int64 expiryAt(int64 now) {
+        if (this.expires > 0L) return this.expires;
+        if (this.ttl > 0L) return now + this.ttl;
+        return 0L;
+    }
+}

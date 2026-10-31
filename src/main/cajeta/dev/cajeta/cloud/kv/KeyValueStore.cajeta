@@ -1,0 +1,39 @@
+package dev.cajeta.cloud.kv;
+
+import cajeta.lang.String;
+import dev.cajeta.cloud.Capabilities;
+import dev.cajeta.cloud.CloudStats;
+
+/**
+ * The key-value port (cajeta-cloud-cloudflare spec 6.1): bytes under string
+ * keys with metadata and expiry, prefix listing behind a cursor, and
+ * conditional writes where the provider declares them (`Caps.KV_*`). The
+ * consistency model is declared too: `kv.strong-consistency`, or eventual
+ * with `propagationBoundSeconds()` the documented bound.
+ */
+public interface KeyValueStore {
+
+    Capabilities capabilities();
+
+    CloudStats stats();
+
+    /** 0 when reads see writes at once; else the seconds within which they do. */
+    int64 propagationBoundSeconds();
+
+    void put(String key, int8[] value, PutOptions options);
+
+    /** The entry, or null when absent or expired. */
+    #KvEntry get(String key);
+
+    /** True when the key existed. */
+    boolean delete(String key);
+
+    /** Up to `limit` keys under `prefix` from `cursor` ("" for the start). */
+    #KvListPage list(String prefix, String cursor, int64 limit);
+
+    /** Writes only when the key is absent (`kv.conditional-create`). */
+    #KvCondResult putIfAbsent(String key, int8[] value, PutOptions options);
+
+    /** Writes only when the stored version is `expectedVersion` (`kv.compare-and-set`). */
+    #KvCondResult compareAndSet(String key, String expectedVersion, int8[] value, PutOptions options);
+}

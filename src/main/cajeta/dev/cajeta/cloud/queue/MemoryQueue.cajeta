@@ -1,0 +1,145 @@
+package dev.cajeta.cloud.queue;
+
+import cajeta.collection.ArrayList;
+import cajeta.concurrent.Lock;
+import cajeta.concurrent.LockGuard;
+import cajeta.lang.String;
+import dev.cajeta.cloud.Capabilities;
+import dev.cajeta.cloud.Caps;
+import dev.cajeta.cloud.CloudException;
+import dev.cajeta.cloud.CloudStats;
+import dev.cajeta.cloud.identity.TimeSource;
+
+/**
+ * The in-memory queue driver (cloudflare spec 5.1.8): visibility windows,
+ * redelivery with the attempt count raised, receipt expiry and delayed sends,
+ * all on an injected clock so a test steps time instead of sleeping. One lock
+ * serializes it, so two consumers never hold one message. Declares
+ * `queue.delayed-send` and nothing Kafka- or SQS-FIFO-shaped.
+ */
+public final class MemoryQueue implements MessageQueue {
+    Lock lock;
+    ArrayList<Stored> messages;
+    int64 seq;
+    TimeSource clock;
+    Capabilities caps;
+    CloudStats statsObj;
+
+    public MemoryQueue(^TimeSource clock) {
+        this.lock = heap Lock();
+        this.messages = heap ArrayList<Stored>();
+        this.seq = 0L;
+        this.clock = clock;
+        this.statsObj = heap CloudStats();
+        Capabilities c = heap Capabilities("memory-queue");
+        c.declare(Caps.QUEUE_DELAYED_SEND(), "on the driver's clock");
+        this.caps #= c;
+        return;
+    }
+
+    public Capabilities capabilities() { return this.caps; }
+    public CloudStats stats() { return this.statsObj; }
+
+    public #String send(int8[] body, MessageAttributes attributes, int64 delaySeconds) {
+        LockGuard g #= this.lock.acquire();
+        return this.enqueue(body, attributes, delaySeconds);
+    }
+
+    public #String[] sendBatch(ArrayList<Outgoing> batch) {
+        LockGuard g #= this.lock.acquire();
+        int32 n = batch.count();
+        String[] ids = heap String[(int64) n];
+        for (int32 i = 0; i < n; i++) {
+            Outgoing o = batch.get(i);
+            ids[i] #= this.enqueue(o.body(), o.attributes(), o.delaySeconds());
+        }
+        return #ids;
+    }
+
+    private #String enqueue(int8[] body, MessageAttributes attributes, int64 delaySeconds) {
+        int64 now = this.clock.nowSeconds();
+        this.seq = this.seq + 1L;
+        String id #= "m" + this.seq;
+        int64 n = body.count();
+        int8[] copy = heap int8[n];
+        for (int64 i = 0L; i < n; i++) copy[i] = body[i];
+        MessageAttributes attrs #= attributes.copy();
+        String stored #= "" + id;
+        this.messages.add(heap Stored(#copy, #attrs, #stored, now, now + delaySeconds));
+        this.statsObj.recordCall(0L, n, 0L, false);
+        return #id;
+    }
+
+    public #Received receive(int32 max, int64 visibilitySeconds) {
+        LockGuard g #= this.lock.acquire();
+        int64 now = this.clock.nowSeconds();
+        ArrayList<Message> out = heap ArrayList<Message>();
+        for (int32 i = 0; i < this.messages.count() && out.count() < max; i++) {
+            Stored s = this.messages.get(i);
+            if (s.visibleAt > now || s.held(now)) continue;
+            this.seq = this.seq + 1L;
+            s.receipt #= "r" + this.seq;
+            s.leaseUntil = now + visibilitySeconds;
+            s.attempts = s.attempts + 1;
+            int64 n = s.data.count();
+            int8[] copy = heap int8[n];
+            for (int64 k = 0L; k < n; k++) copy[k] = s.data[k];
+            MessageAttributes attrs #= s.attrs.copy();
+            out.add(heap Message(#copy, #attrs, s.id, s.receipt, s.attempts, s.sentAt));
+            this.statsObj.recordCall(0L, 0L, n, false);
+        }
+        return heap Received(#out);
+    }
+
+    public void ack(String receipt) {
+        LockGuard g #= this.lock.acquire();
+        this.ackLocked(receipt);
+        return;
+    }
+
+    public void ackAll(ArrayList<String> receipts) {
+        LockGuard g #= this.lock.acquire();
+        for (int32 i = 0; i < receipts.count(); i++) this.ackLocked(receipts.get(i));
+        return;
+    }
+
+    private void ackLocked(String receipt) {
+        int32 at = this.heldIndex(receipt);
+        if (at < 0) {
+            throw heap CloudException(CloudException.PRECONDITION_FAILED(), "memory-queue", "ack", receipt,
+                "the receipt is expired or unknown; the message may have gone to another consumer");
+        }
+        Stored gone #= this.messages.removeAt(at);
+        return;
+    }
+
+    public void release(String receipt, int64 delaySeconds) {
+        LockGuard g #= this.lock.acquire();
+        int32 at = this.heldIndex(receipt);
+        if (at < 0) {
+            throw heap CloudException(CloudException.PRECONDITION_FAILED(), "memory-queue", "release", receipt,
+                "the receipt is expired or unknown; the message may have gone to another consumer");
+        }
+        Stored s = this.messages.get(at);
+        s.receipt = null;
+        s.leaseUntil = 0L;
+        s.visibleAt = this.clock.nowSeconds() + delaySeconds;
+        return;
+    }
+
+    // The index of the message `receipt` currently holds, or -1.
+    private int32 heldIndex(String receipt) {
+        int64 now = this.clock.nowSeconds();
+        for (int32 i = 0; i < this.messages.count(); i++) {
+            Stored s = this.messages.get(i);
+            if (s.receipt != null && s.receipt.equals(receipt) && s.leaseUntil > now) return i;
+        }
+        return -1;
+    }
+
+    /** Messages not yet acknowledged, held or not (tests). */
+    public int32 pending() {
+        LockGuard g #= this.lock.acquire();
+        return this.messages.count();
+    }
+}

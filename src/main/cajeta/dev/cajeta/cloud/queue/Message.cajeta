@@ -1,0 +1,37 @@
+package dev.cajeta.cloud.queue;
+
+import cajeta.lang.String;
+
+/**
+ * One received message (cloudflare spec 5.1.2): its body and attributes, the
+ * provider's id, how many times it has been delivered, when it was sent, and
+ * the receipt that holds it for the consumer's visibility window. The receipt
+ * is opaque; `ack` and `release` take it back.
+ */
+public final class Message {
+    int8[] data;
+    MessageAttributes attrs;
+    String ident;
+    String lease;
+    int32 attempts;
+    int64 sentAt;
+
+    public Message(#int8[] body, #MessageAttributes attributes, String id, String receipt,
+                   int32 attempt, int64 sentAtSeconds) {
+        this.data #= body;
+        this.attrs #= attributes;
+        this.ident = "" + id;
+        this.lease = "" + receipt;
+        this.attempts = attempt;
+        this.sentAt = sentAtSeconds;
+        return;
+    }
+
+    public int8[] body() { return this.data; }
+    public MessageAttributes attributes() { return this.attrs; }
+    public String id() { return this.ident; }
+    public String receipt() { return this.lease; }
+    /** 1 on first delivery. */
+    public int32 attempt() { return this.attempts; }
+    public int64 sentAtSeconds() { return this.sentAt; }
+}

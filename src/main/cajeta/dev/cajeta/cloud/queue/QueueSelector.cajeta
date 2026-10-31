@@ -1,0 +1,57 @@
+package dev.cajeta.cloud.queue;
+
+import cajeta.collection.ArrayList;
+import cajeta.collection.HashMap;
+import cajeta.lang.String;
+import cajeta.collection.Collectors;
+import dev.cajeta.cloud.Selection;
+import dev.cajeta.cloud.identity.DevelopmentProfile;
+
+/**
+ * Chooses the `MessageQueue` a program uses, by the identity port's rule
+ * (identity spec §9, `Selection.decide`): every compiled-in implementation
+ * arrives as a named component, `queue.provider` names one (a `QueueConfig`
+ * component, else `QUEUE_PROVIDER`), and the build's profile decides whether
+ * the memory driver may stand in unnamed.
+ */
+@Component
+public final class QueueSelector {
+
+    @Inject HashMap<String, MessageQueue> queues;
+    @Inject ArrayList<QueueConfig> config;
+    @Inject ArrayList<DevelopmentProfile> development;
+
+    String chosen;
+
+    public QueueSelector() {
+        this.chosen = null;
+        return;
+    }
+
+    @PostConstruct
+    public void select() {
+        ArrayList<String> names #= this.queues.keys().collect(Collectors.toList<String>());
+        int32 n = (int32) names.count();
+        String[] present = heap String[n];
+        int32 i = 0;
+        while (i < n) {
+            present[i] #= names.get(i);
+            i = i + 1;
+        }
+        String configured = null;
+        if (this.config.count() > 0) {
+            configured = this.config.get(0).provider();
+        }
+        if (configured == null || configured.byteLength() == 0) {
+            configured = System.env.get(QueueSelector.ENV());
+        }
+        this.chosen #= Selection.decide("queue.provider", present, configured, this.development.count() > 0);
+        return;
+    }
+
+    public static String ENV() { return "QUEUE_PROVIDER"; }
+
+    public String provider() { return this.chosen; }
+
+    public MessageQueue queue() { return this.queues.get(this.chosen); }
+}

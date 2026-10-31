@@ -1,0 +1,39 @@
+package dev.cajeta.cloud.selftest;
+
+import cajeta.collection.ArrayList;
+import cajeta.lang.String;
+import dev.cajeta.cloud.Capabilities;
+import dev.cajeta.cloud.CloudStats;
+import dev.cajeta.cloud.identity.ManualTimeSource;
+import dev.cajeta.cloud.queue.MemoryQueue;
+import dev.cajeta.cloud.queue.MessageAttributes;
+import dev.cajeta.cloud.queue.Outgoing;
+import dev.cajeta.cloud.queue.MessageQueue;
+import dev.cajeta.cloud.queue.Received;
+
+/** A queue over the memory driver that acknowledges every message as it is received, so nothing ever comes back. */
+final class LiarQueue implements MessageQueue {
+    MemoryQueue inner;
+
+    LiarQueue(ManualTimeSource clock) {
+        this.inner = heap MemoryQueue(clock);
+        return;
+    }
+
+    public Capabilities capabilities() { return this.inner.capabilities(); }
+    public CloudStats stats() { return this.inner.stats(); }
+    public #String send(int8[] body, MessageAttributes attributes, int64 delaySeconds) {
+        return this.inner.send(body, attributes, delaySeconds);
+    }
+    public #String[] sendBatch(ArrayList<Outgoing> messages) { return this.inner.sendBatch(messages); }
+    public #Received receive(int32 max, int64 visibilitySeconds) {
+        Received r #= this.inner.receive(max, visibilitySeconds);
+        for (int32 i = 0; i < r.count(); i++) {
+            this.inner.ack(r.messageAt(i).receipt());
+        }
+        return #r;
+    }
+    public void ack(String receipt) { return; }
+    public void ackAll(ArrayList<String> receipts) { return; }
+    public void release(String receipt, int64 delaySeconds) { return; }
+}

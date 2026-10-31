@@ -1,0 +1,19 @@
+package dev.cajeta.cloud.queue;
+
+/** One message to send in a batch: its body, attributes and delivery delay in seconds. */
+public final class Outgoing {
+    int8[] data;
+    MessageAttributes attrs;
+    int64 delay;
+
+    public Outgoing(#int8[] body, #MessageAttributes attributes, int64 delaySeconds) {
+        this.data #= body;
+        this.attrs #= attributes;
+        this.delay = delaySeconds;
+        return;
+    }
+
+    public int8[] body() { return this.data; }
+    public MessageAttributes attributes() { return this.attrs; }
+    public int64 delaySeconds() { return this.delay; }
+}

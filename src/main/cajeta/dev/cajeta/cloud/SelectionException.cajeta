@@ -1,0 +1,12 @@
+package dev.cajeta.cloud;
+
+import cajeta.error.RecoverableException;
+import cajeta.lang.String;
+
+/** A port's provider selection was refused (identity spec §9, shared by the queue and key-value ports). */
+public class SelectionException extends RecoverableException {
+    public SelectionException(String message) {
+        super(message);
+        return;
+    }
+}

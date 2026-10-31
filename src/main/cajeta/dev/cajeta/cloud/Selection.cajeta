@@ -1,0 +1,56 @@
+package dev.cajeta.cloud;
+
+import cajeta.lang.String;
+
+/**
+ * The selection rule every port's selector applies (identity spec §9.2 to
+ * §9.5): a configured name must be present; unset selects the only
+ * implementation, which must be the memory driver in a development or test
+ * profile; anything else is refused, naming the configuration key (such as
+ * `queue.provider`) and what is present. `IdentitySelector` carries its own
+ * copy of this rule, written first; the queue and key-value selectors share
+ * this one.
+ */
+public final class Selection {
+
+    static #String listing(String[] present) {
+        String out = "";
+        int32 i = 0;
+        while (i < present.count()) {
+            if (i > 0) {
+                out = out + ", ";
+            }
+            out = out + present[i];
+            i = i + 1;
+        }
+        return #out;
+    }
+
+    public static #String decide(String key, String[] present, String configured, boolean development) {
+        if (configured != null && configured.byteLength() > 0) {
+            int32 i = 0;
+            while (i < present.count()) {
+                if (present[i].equals(configured)) {
+                    String hit = "" + configured;
+                    return #hit;
+                }
+                i = i + 1;
+            }
+            throw heap SelectionException(key + " = " + configured
+                + " matches no compiled-in implementation; present: " + Selection.listing(present));
+        }
+        if (present.count() == 0) {
+            throw heap SelectionException(key + " is unset and no implementation is compiled in");
+        }
+        if (present.count() > 1) {
+            throw heap SelectionException(key + " is unset and " + present.count()
+                + " implementations are compiled in; name one of: " + Selection.listing(present));
+        }
+        if (present[0].equals("memory") && !development) {
+            throw heap SelectionException(key + " is unset, and outside a test or dev profile the memory "
+                + "driver must be named (" + key + " = memory): its contents are gone on restart");
+        }
+        String only = "" + present[0];
+        return #only;
+    }
+}

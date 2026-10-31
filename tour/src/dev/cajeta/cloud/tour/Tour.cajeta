@@ -6,6 +6,14 @@ import dev.cajeta.cloud.CloudException;
 import dev.cajeta.cloud.Credentials;
 import dev.cajeta.cloud.RetryPolicy;
 import dev.cajeta.cloud.identity.Claims;
+import dev.cajeta.cloud.identity.ManualTimeSource;
+import dev.cajeta.cloud.kv.KvCondResult;
+import dev.cajeta.cloud.kv.KvEntry;
+import dev.cajeta.cloud.kv.MemoryKeyValue;
+import dev.cajeta.cloud.kv.PutOptions;
+import dev.cajeta.cloud.queue.MemoryQueue;
+import dev.cajeta.cloud.queue.MessageAttributes;
+import dev.cajeta.cloud.queue.Received;
 import dev.cajeta.cloud.identity.IdentityCapability;
 import dev.cajeta.cloud.identity.IdentityException;
 import dev.cajeta.cloud.identity.MemoryUserPool;
@@ -155,6 +163,65 @@ public final class Tour {
         return;
     }
 
+    /** Passage 4b — the queue port: hold by receipt, acknowledge or get it back. */
+    static void queuePassage() {
+        System.stdout.println("passage: the queue port");
+        ManualTimeSource clock = heap ManualTimeSource(1700000000L);
+        MemoryQueue q = heap MemoryQueue(clock);
+        int8[] body #= "render invoice 42".toBytes();
+        MessageAttributes a = heap MessageAttributes();
+        a.add("kind", "invoice");
+        String id #= q.send(body, a, 0L);
+        Received r1 #= q.receive(10, 30L);
+        Tour.check(r1.count() == 1 && r1.messageAt(0).attempt() == 1,
+            "a sent message is received once, attempt 1, with its attributes");
+        Received r2 #= q.receive(10, 30L);
+        Tour.check(r2.count() == 0,
+            "a held message goes to no second consumer inside its window");
+        clock.advance(31L);
+        Received r3 #= q.receive(10, 30L);
+        Tour.check(r3.count() == 1 && r3.messageAt(0).attempt() == 2,
+            "unacknowledged, it comes back after the window with attempt 2");
+        q.ack(r3.messageAt(0).receipt());
+        clock.advance(60L);
+        Received r4 #= q.receive(10, 30L);
+        Tour.check(r4.count() == 0, "acknowledged, it is gone for good");
+        Tour.check(!q.capabilities().supports(Caps.QUEUE_FIFO()),
+            "FIFO is a capability, declared not assumed; the memory driver declares it not");
+        return;
+    }
+
+    /** Passage 4c — the key-value port: declared consistency and conditional writes. */
+    static void keyValuePassage() {
+        System.stdout.println("passage: the key-value port");
+        ManualTimeSource clock = heap ManualTimeSource(1700000000L);
+        MemoryKeyValue strong = heap MemoryKeyValue(clock);
+        int8[] v1 #= "first".toBytes();
+        int8[] v2 #= "second".toBytes();
+        PutOptions o = heap PutOptions();
+        o.metadata("{\"owner\":\"ada\"}");
+        KvCondResult c1 #= strong.putIfAbsent("doc", v1, o);
+        KvCondResult c2 #= strong.putIfAbsent("doc", v2, o);
+        Tour.check(c1.won && !c2.won && c2.version.equals(c1.version),
+            "a conditional create wins once; the loser is told the current version");
+        KvEntry e #= strong.get("doc");
+        Tour.check(e != null && Tour.text(e.value()).equals("first")
+            && e.metadata().equals("{\"owner\":\"ada\"}"),
+            "a strong store reads its write at once, metadata beside it");
+        MemoryKeyValue eventual #= MemoryKeyValue.eventual(clock, 5L);
+        eventual.put("doc", v2, o);
+        KvEntry stale #= eventual.get("doc");
+        clock.advance(5L);
+        KvEntry fresh #= eventual.get("doc");
+        Tour.check(stale == null && fresh != null,
+            "an eventual store (Workers KV's shape) reads a write within its declared bound, "
+            + "and the memory driver models the lag so you can test for it");
+        Tour.check(!eventual.capabilities().supports(Caps.KV_STRONG_CONSISTENCY())
+            && eventual.propagationBoundSeconds() == 5L,
+            "the consistency model is a declared capability with a bound");
+        return;
+    }
+
     /** Passage 5 — errors, retry, redaction, and the testkit. */
     static void operationsPassage() {
         System.stdout.println("passage: operations");
@@ -229,6 +296,8 @@ public final class Tour {
         Tour.conditionalPassage();
         Tour.capabilityPassage();
         Tour.streamPassage();
+        Tour.queuePassage();
+        Tour.keyValuePassage();
         Tour.operationsPassage();
         Tour.identityPassage();
         if (Tour.failures > 0) {

@@ -1,0 +1,45 @@
+package dev.cajeta.cloud.queue;
+
+import cajeta.collection.ArrayList;
+import cajeta.lang.String;
+
+/** A message's name/value attributes, in the order given; names compare exactly. */
+public final class MessageAttributes {
+    ArrayList<String> names;
+    ArrayList<String> values;
+
+    public MessageAttributes() {
+        this.names = heap ArrayList<String>();
+        this.values = heap ArrayList<String>();
+        return;
+    }
+
+    public void add(String name, String value) {
+        String n = "" + name;
+        String v = "" + value;
+        this.names.add(#n);
+        this.values.add(#v);
+        return;
+    }
+
+    public int32 count() { return this.names.count(); }
+    public String nameAt(int32 i) { return this.names.get(i); }
+    public String valueAt(int32 i) { return this.values.get(i); }
+
+    /** The value under `name`, or null. */
+    public String get(String name) {
+        for (int32 i = 0; i < this.names.count(); i++) {
+            if (this.names.get(i).equals(name)) return this.values.get(i);
+        }
+        return null;
+    }
+
+    /** An owned copy. */
+    public #MessageAttributes copy() {
+        MessageAttributes out = heap MessageAttributes();
+        for (int32 i = 0; i < this.names.count(); i++) {
+            out.add(this.names.get(i), this.values.get(i));
+        }
+        return #out;
+    }
+}

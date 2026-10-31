@@ -1,0 +1,13 @@
+package dev.cajeta.cloud.queue;
+
+import cajeta.lang.String;
+
+/**
+ * `queue.provider` set in code: which compiled-in `MessageQueue` to use. The
+ * `QUEUE_PROVIDER` environment variable names it otherwise; a component of
+ * this type overrides the environment when its `provider()` returns a name,
+ * and null defers to it (identity spec §9.2).
+ */
+public interface QueueConfig {
+    String provider();
+}

@@ -1,0 +1,16 @@
+package dev.cajeta.cloud.queue;
+
+import cajeta.collection.ArrayList;
+
+/** One receive's messages; empty means nothing was available. */
+public final class Received {
+    ArrayList<Message> list;
+
+    public Received(#ArrayList<Message> messages) {
+        this.list #= messages;
+        return;
+    }
+
+    public int32 count() { return this.list.count(); }
+    public Message messageAt(int32 i) { return this.list.get(i); }
+}

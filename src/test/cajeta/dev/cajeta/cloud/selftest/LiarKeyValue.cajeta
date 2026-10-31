@@ -1,0 +1,40 @@
+package dev.cajeta.cloud.selftest;
+
+import cajeta.lang.String;
+import dev.cajeta.cloud.Capabilities;
+import dev.cajeta.cloud.CloudStats;
+import dev.cajeta.cloud.identity.ManualTimeSource;
+import dev.cajeta.cloud.kv.KvEntry;
+import dev.cajeta.cloud.kv.KeyValueStore;
+import dev.cajeta.cloud.kv.KvCondResult;
+import dev.cajeta.cloud.kv.KvListPage;
+import dev.cajeta.cloud.kv.MemoryKeyValue;
+import dev.cajeta.cloud.kv.PutOptions;
+
+/** A store over the memory driver whose conditional writes always report a win. */
+final class LiarKeyValue implements KeyValueStore {
+    MemoryKeyValue inner;
+
+    LiarKeyValue(ManualTimeSource clock) {
+        this.inner = heap MemoryKeyValue(clock);
+        return;
+    }
+
+    public Capabilities capabilities() { return this.inner.capabilities(); }
+    public CloudStats stats() { return this.inner.stats(); }
+    public int64 propagationBoundSeconds() { return this.inner.propagationBoundSeconds(); }
+    public void put(String key, int8[] value, PutOptions options) { this.inner.put(key, value, options); }
+    public #KvEntry get(String key) { return this.inner.get(key); }
+    public boolean delete(String key) { return this.inner.delete(key); }
+    public #KvListPage list(String prefix, String cursor, int64 limit) { return this.inner.list(prefix, cursor, limit); }
+    public #KvCondResult putIfAbsent(String key, int8[] value, PutOptions options) {
+        KvCondResult r #= this.inner.putIfAbsent(key, value, options);
+        String v = "" + r.version;
+        return heap KvCondResult(true, #v);
+    }
+    public #KvCondResult compareAndSet(String key, String expectedVersion, int8[] value, PutOptions options) {
+        KvCondResult r #= this.inner.compareAndSet(key, expectedVersion, value, options);
+        String v = "" + r.version;
+        return heap KvCondResult(true, #v);
+    }
+}

@@ -1,0 +1,9 @@
+package dev.cajeta.cloud.testkit;
+
+/**
+ * How a contract lets time pass: a {@link ManualWaiter} steps a driver's
+ * manual clock, a {@link RealWaiter} sleeps against a real service.
+ */
+public interface Waiter {
+    void pass(int64 seconds);
+}

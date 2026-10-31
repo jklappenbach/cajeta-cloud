@@ -1,0 +1,13 @@
+package dev.cajeta.cloud.kv;
+
+import cajeta.lang.String;
+
+/**
+ * `kv.provider` set in code: which compiled-in `KeyValueStore` to use. The
+ * `KV_PROVIDER` environment variable names it otherwise; a component of this
+ * type overrides the environment when its `provider()` returns a name, and
+ * null defers to it (identity spec §9.2).
+ */
+public interface KeyValueConfig {
+    String provider();
+}

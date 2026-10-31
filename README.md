@@ -229,6 +229,26 @@ A refusal is an `IdentitySelectionException`, thrown when the selector is
 built, so injecting it at startup refuses startup. The development
 profiles are `test`, `dev` and `development`.
 
+## The queue port — `dev.cajeta.cloud.queue`
+
+Each message goes to one consumer, held by receipt for a visibility window;
+`ack` finishes it, `release` gives it back after a delay, and an unacknowledged
+message is delivered again with its attempt count raised. At least once,
+unordered; FIFO, exactly-once and message groups are capabilities. `MemoryQueue`
+runs on an injectable clock; `QueueContract` is the conformance suite;
+`QueueSelector` picks the provider (`QUEUE_PROVIDER` or a `QueueConfig`). Skill:
+`cloud-queue`. Spec: `cajeta-cloud-cloudflare` §5.1.
+
+## The key-value port — `dev.cajeta.cloud.kv`
+
+Bytes under string keys with metadata and expiry, prefix listing behind a
+cursor, and conditional writes where declared. The consistency model is
+declared too: strong, or eventual within `propagationBoundSeconds()`.
+`MemoryKeyValue` is strong by default and `MemoryKeyValue.eventual(clock, lag)`
+models a store like Workers KV; `KeyValueContract` is the conformance suite;
+`KeyValueSelector` picks the provider (`KV_PROVIDER` or a `KeyValueConfig`).
+Skill: `cloud-key-value`. Spec: `cajeta-cloud-cloudflare` §6.1.
+
 ## Capability negotiation — `Capabilities` / `Caps`
 
 A definitive answer **before** any operation (§3). Partial support is
@@ -268,6 +288,11 @@ lacking it would surface as data corruption, not a startup error.
 | `identity.refresh` / `revocation` / `admin` / `password-reset` | yes | — | Cognito adapter |
 | `identity.jwks` | yes (ES256, public key published) | — | Cognito adapter (RS256, verifiable since 0.4.0) |
 | `identity.passwordless` | yes | — | Cognito adapter (Essentials tier) |
+| `queue.delayed-send` | memory-queue: yes | — | Cloudflare Queues adapter |
+| `queue.fifo` / `exactly-once` / `message-groups` | no | — | SQS FIFO, Service Bus (adapters to come) |
+| `kv.conditional-create` / `compare-and-set` | memory-kv: yes | — | DynamoDB, Firestore (adapters to come); Workers KV: no |
+| `kv.strong-consistency` / `read-your-writes` | memory-kv: yes (eventual form: no, bound = lag) | — | Workers KV: eventual |
+| `kv.expiry` / `kv.metadata` | memory-kv: yes | — | Workers KV adapter |
 | `identity.totp-sign-in` | yes | — | no: Cognito takes TOTP as a second factor only |
 | `identity.passkeys` / `introspection` | no | — | Cognito adapter |
 

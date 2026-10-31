@@ -1,0 +1,160 @@
+package dev.cajeta.cloud.selftest;
+
+import cajeta.lang.String;
+import dev.cajeta.unit.Assert;
+import dev.cajeta.cloud.Caps;
+import dev.cajeta.cloud.CloudException;
+import dev.cajeta.cloud.identity.ManualTimeSource;
+import dev.cajeta.cloud.kv.KvEntry;
+import dev.cajeta.cloud.kv.KvCondResult;
+import dev.cajeta.cloud.kv.KvListPage;
+import dev.cajeta.cloud.kv.MemoryKeyValue;
+import dev.cajeta.cloud.kv.PutOptions;
+import dev.cajeta.cloud.testkit.KeyValueContract;
+import dev.cajeta.cloud.testkit.ManualWaiter;
+
+/**
+ * The key-value port against the memory driver (cloudflare spec 6.1, plan
+ * 2.1.3 to 2.1.5): put, get with metadata, delete, prefix listing behind a
+ * cursor, expiry on the clock, conditional writes where declared, strong
+ * consistency by default and an eventual model with a lag when configured,
+ * and the full contract in both forms.
+ */
+public class KeyValueTest {
+
+    public KeyValueTest() { return; }
+
+    static #int8[] bytes(String s) { return s.toBytes(); }
+
+    static #String text(int8[] b) {
+        int8[] copy = heap int8[(int64) b.count()];
+        int64 i = 0;
+        while (i < (int64) copy.count()) { copy[i] = b[i]; i = i + 1; }
+        String s = heap String(#copy, (int32) b.count());
+        return #s;
+    }
+
+    @Test
+    public void putGetDeleteAndMetadata() {
+        ManualTimeSource clock = heap ManualTimeSource(1700000000L);
+        MemoryKeyValue kv = heap MemoryKeyValue(clock);
+        int8[] v #= KeyValueTest.bytes("value one");
+        PutOptions o = heap PutOptions();
+        o.metadata("{\"role\":\"admin\"}");
+        kv.put("user:1", v, o);
+        KvEntry e #= kv.get("user:1");
+        Assert.isTrue(e != null);
+        Assert.equals("value one", KeyValueTest.text(e.value()));
+        Assert.equals("{\"role\":\"admin\"}", e.metadata());
+        Assert.isTrue(e.version().byteLength() > 0);
+        Assert.isTrue(e.expiresAtSeconds() == 0L);
+        KvEntry none #= kv.get("user:2");
+        Assert.isTrue(none == null);
+        Assert.isTrue(kv.delete("user:1"));
+        Assert.isTrue(!kv.delete("user:1"));
+        KvEntry gone #= kv.get("user:1");
+        Assert.isTrue(gone == null);
+        return;
+    }
+
+    @Test
+    public void expiryIsAbsoluteOrATimeToLive() {
+        ManualTimeSource clock = heap ManualTimeSource(1700000000L);
+        MemoryKeyValue kv = heap MemoryKeyValue(clock);
+        int8[] v #= KeyValueTest.bytes("x");
+        PutOptions abs = heap PutOptions();
+        abs.expiresAt(1700000100L);
+        kv.put("a", v, abs);
+        PutOptions ttl = heap PutOptions();
+        ttl.timeToLive(50L);
+        kv.put("b", v, ttl);
+        KvEntry ea #= kv.get("a");
+        Assert.isTrue(ea.expiresAtSeconds() == 1700000100L);
+        KvEntry eb #= kv.get("b");
+        Assert.isTrue(eb.expiresAtSeconds() == 1700000050L);
+        clock.advance(50L);
+        KvEntry gb #= kv.get("b");
+        Assert.isTrue(gb == null);
+        KvEntry sa #= kv.get("a");
+        Assert.isTrue(sa != null);
+        clock.advance(50L);
+        KvEntry ga #= kv.get("a");
+        Assert.isTrue(ga == null);
+        return;
+    }
+
+    @Test
+    public void listingByPrefixPagesBehindACursor() {
+        ManualTimeSource clock = heap ManualTimeSource(1700000000L);
+        MemoryKeyValue kv = heap MemoryKeyValue(clock);
+        int8[] v #= KeyValueTest.bytes("v");
+        PutOptions o = heap PutOptions();
+        kv.put("p/3", v, o);
+        kv.put("p/1", v, o);
+        kv.put("q/1", v, o);
+        kv.put("p/2", v, o);
+        KvListPage page1 #= kv.list("p/", "", 2L);
+        Assert.equals(2L, (int64) page1.count());
+        Assert.isTrue(page1.cursor().byteLength() > 0);
+        KvListPage page2 #= kv.list("p/", page1.cursor(), 2L);
+        Assert.equals(1L, (int64) page2.count());
+        Assert.equals("", page2.cursor());
+        String all = page1.keyAt(0) + "," + page1.keyAt(1) + "," + page2.keyAt(0);
+        Assert.equals("p/1,p/2,p/3", all);
+        return;
+    }
+
+    @Test
+    public void conditionalWritesAreDeclaredAndHonoured() {
+        ManualTimeSource clock = heap ManualTimeSource(1700000000L);
+        MemoryKeyValue kv = heap MemoryKeyValue(clock);
+        Assert.isTrue(kv.capabilities().supports(Caps.KV_CONDITIONAL_CREATE()));
+        Assert.isTrue(kv.capabilities().supports(Caps.KV_COMPARE_AND_SET()));
+        Assert.isTrue(kv.capabilities().supports(Caps.KV_STRONG_CONSISTENCY()));
+        Assert.isTrue(kv.propagationBoundSeconds() == 0L);
+        int8[] v1 #= KeyValueTest.bytes("first");
+        int8[] v2 #= KeyValueTest.bytes("second");
+        PutOptions o = heap PutOptions();
+        KvCondResult c1 #= kv.putIfAbsent("k", v1, o);
+        Assert.isTrue(c1.won);
+        KvCondResult c2 #= kv.putIfAbsent("k", v2, o);
+        Assert.isTrue(!c2.won);
+        Assert.equals(c1.version, c2.version);
+        KvCondResult c3 #= kv.compareAndSet("k", "stale", v2, o);
+        Assert.isTrue(!c3.won);
+        KvCondResult c4 #= kv.compareAndSet("k", c1.version, v2, o);
+        Assert.isTrue(c4.won);
+        KvEntry e #= kv.get("k");
+        Assert.equals("second", KeyValueTest.text(e.value()));
+        return;
+    }
+
+    @Test
+    public void anEventualDriverLagsItsWritesByItsBound() {
+        ManualTimeSource clock = heap ManualTimeSource(1700000000L);
+        MemoryKeyValue kv #= MemoryKeyValue.eventual(clock, 5L);
+        Assert.isTrue(!kv.capabilities().supports(Caps.KV_STRONG_CONSISTENCY()));
+        Assert.isTrue(kv.propagationBoundSeconds() == 5L);
+        int8[] v #= KeyValueTest.bytes("new");
+        PutOptions o = heap PutOptions();
+        kv.put("k", v, o);
+        KvEntry before #= kv.get("k");
+        Assert.isTrue(before == null);
+        clock.advance(5L);
+        KvEntry after #= kv.get("k");
+        Assert.isTrue(after != null);
+        Assert.equals("new", KeyValueTest.text(after.value()));
+        return;
+    }
+
+    @Test
+    public void theContractHoldsInBothForms() {
+        ManualTimeSource clock = heap ManualTimeSource(1700000000L);
+        MemoryKeyValue strong = heap MemoryKeyValue(clock);
+        ManualWaiter w = heap ManualWaiter(clock);
+        KeyValueContract.verify(strong, w, "contract/");
+        MemoryKeyValue eventual #= MemoryKeyValue.eventual(clock, 3L);
+        KeyValueContract.verify(eventual, w, "contract/");
+        return;
+    }
+}

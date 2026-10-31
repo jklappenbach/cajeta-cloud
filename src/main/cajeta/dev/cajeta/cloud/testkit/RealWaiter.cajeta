@@ -1,0 +1,14 @@
+package dev.cajeta.cloud.testkit;
+
+import cajeta.concurrent.Fiber;
+import cajeta.time.Duration;
+
+/** Passes time by sleeping, for a contract run against a real service. */
+public final class RealWaiter implements Waiter {
+    public RealWaiter() { return; }
+
+    public void pass(int64 seconds) {
+        Fiber.sleep(Duration.ofMillis(seconds * 1000L));
+        return;
+    }
+}

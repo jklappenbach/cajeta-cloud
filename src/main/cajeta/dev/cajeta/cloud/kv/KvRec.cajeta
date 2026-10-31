@@ -1,0 +1,32 @@
+package dev.cajeta.cloud.kv;
+
+import cajeta.lang.String;
+
+/**
+ * Package-private: one key's state in the memory driver. `value` null is a
+ * tombstone. `since` is when this state became readable; before it, `prior`
+ * (the previously readable state, or null) is what a read sees, which is
+ * how the eventual form lags.
+ */
+final class KvRec {
+    int8[] value;
+    String meta;
+    String version;
+    int64 expires;
+    int64 since;
+    KvRec prior;
+
+    KvRec(#int8[] value, String meta, #String version, int64 expires, int64 since) {
+        this.value #= value;
+        this.meta = "" + meta;
+        this.version #= version;
+        this.expires = expires;
+        this.since = since;
+        this.prior = null;
+        return;
+    }
+
+    boolean live(int64 now) {
+        return this.value != null && (this.expires == 0L || this.expires > now);
+    }
+}

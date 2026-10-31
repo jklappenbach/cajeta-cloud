@@ -1,0 +1,18 @@
+package dev.cajeta.cloud.testkit;
+
+import dev.cajeta.cloud.identity.ManualTimeSource;
+
+/** Passes time by stepping the driver's manual clock. */
+public final class ManualWaiter implements Waiter {
+    ManualTimeSource clock;
+
+    public ManualWaiter(^ManualTimeSource clock) {
+        this.clock = clock;
+        return;
+    }
+
+    public void pass(int64 seconds) {
+        this.clock.advance(seconds);
+        return;
+    }
+}

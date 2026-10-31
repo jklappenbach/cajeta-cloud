@@ -1,0 +1,19 @@
+package dev.cajeta.cloud.kv;
+
+import cajeta.lang.String;
+
+/** One page of keys under a prefix, and the cursor for the next ("" on the last page). */
+public final class KvListPage {
+    String[] keyList;
+    String next;
+
+    public KvListPage(#String[] keys, #String cursor) {
+        this.keyList #= keys;
+        this.next #= cursor;
+        return;
+    }
+
+    public int32 count() { return (int32) this.keyList.count(); }
+    public String keyAt(int32 i) { return this.keyList[i]; }
+    public String cursor() { return this.next; }
+}

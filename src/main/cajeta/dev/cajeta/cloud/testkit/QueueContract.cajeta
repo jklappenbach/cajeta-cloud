@@ -1,0 +1,173 @@
+package dev.cajeta.cloud.testkit;
+
+import cajeta.collection.ArrayList;
+import cajeta.lang.String;
+import dev.cajeta.cloud.Caps;
+import dev.cajeta.cloud.CloudException;
+import dev.cajeta.cloud.queue.MessageQueue;
+import dev.cajeta.cloud.queue.Message;
+import dev.cajeta.cloud.queue.MessageAttributes;
+import dev.cajeta.cloud.queue.Outgoing;
+import dev.cajeta.cloud.queue.Received;
+
+/**
+ * The queue port's conformance suite (cajeta-cloud-cloudflare spec 5.1,
+ * parent §10): one consumer gets a message and holds it by receipt;
+ * acknowledged is gone; unacknowledged comes back with its attempt raised;
+ * an expired receipt fails its own way; released returns after its delay;
+ * a batch arrives whole; attributes round-trip; delayed send and FIFO are
+ * tested when declared. Time passes through the {@link Waiter}, so the
+ * memory driver runs in no time and a real service in seconds. Run it on an
+ * otherwise idle queue. A violation throws a CloudException whose operation
+ * is the check id.
+ */
+public final class QueueContract {
+
+    static void fail(String check, String detail) {
+        throw heap CloudException(CloudException.PROVIDER_ERROR(), "contract", check, "-",
+            check + ": " + detail);
+    }
+
+    static void check(boolean ok, String checkId, String detail) {
+        if (!ok) { QueueContract.fail(checkId, detail); }
+        return;
+    }
+
+    static #int8[] bytesOf(String s) { return s.toBytes(); }
+
+    static #String textOf(int8[] b) {
+        int8[] copy = heap int8[(int64) b.count()];
+        int64 i = 0;
+        while (i < (int64) copy.count()) { copy[i] = b[i]; i = i + 1; }
+        String s = heap String(#copy, (int32) b.count());
+        return #s;
+    }
+
+    public static void verify(MessageQueue q, Waiter w) {
+        QueueContract.basics(q, w);
+        QueueContract.redelivery(q, w);
+        QueueContract.release(q, w);
+        QueueContract.batch(q, w);
+        QueueContract.delayed(q, w);
+        QueueContract.fifo(q, w);
+        return;
+    }
+
+    static void basics(MessageQueue q, Waiter w) {
+        MessageAttributes a = heap MessageAttributes();
+        a.add("contract", "basics");
+        int8[] b #= QueueContract.bytesOf("contract-basics");
+        String id #= q.send(b, a, 0L);
+        QueueContract.check(id.byteLength() > 0, "send-id", "send must return a non-empty id");
+        Received r #= q.receive(10, 30L);
+        QueueContract.check(r.count() == 1, "receive-one", "one sent message must be received once; got " + r.count());
+        Message m = r.messageAt(0);
+        QueueContract.check(QueueContract.textOf(m.body()).equals("contract-basics"), "body", "the body must round-trip");
+        String kind = m.attributes().get("contract");
+        QueueContract.check(kind != null && kind.equals("basics"), "attributes", "attributes must round-trip");
+        QueueContract.check(m.attempt() == 1, "first-attempt", "a first delivery has attempt 1; got " + m.attempt());
+        QueueContract.check(m.receipt().byteLength() > 0, "receipt", "a received message carries a receipt");
+        Received again #= q.receive(10, 30L);
+        QueueContract.check(again.count() == 0, "held", "a held message must not be delivered to a second consumer");
+        q.ack(m.receipt());
+        w.pass(31L);
+        Received after #= q.receive(10, 30L);
+        QueueContract.check(after.count() == 0, "ack-removes", "an acknowledged message must not come back");
+        return;
+    }
+
+    static void redelivery(MessageQueue q, Waiter w) {
+        int8[] b #= QueueContract.bytesOf("contract-redelivery");
+        String id #= q.send(b, heap MessageAttributes(), 0L);
+        Received r1 #= q.receive(1, 2L);
+        QueueContract.check(r1.count() == 1, "redelivery-first", "the message must be received first");
+        String dead = "" + r1.messageAt(0).receipt();
+        w.pass(3L);
+        Received r2 #= q.receive(1, 30L);
+        QueueContract.check(r2.count() == 1, "redelivery", "an unacknowledged message must be delivered again after its window");
+        QueueContract.check(r2.messageAt(0).attempt() == 2, "redelivery-attempt", "a redelivery raises the attempt count; got " + r2.messageAt(0).attempt());
+        boolean refused = false;
+        try {
+            q.ack(dead);
+        } catch (CloudException e) {
+            refused = e.kind() == CloudException.PRECONDITION_FAILED();
+        }
+        QueueContract.check(refused, "receipt-expired", "acknowledging through an expired receipt must fail PRECONDITION_FAILED");
+        q.ack(r2.messageAt(0).receipt());
+        return;
+    }
+
+    static void release(MessageQueue q, Waiter w) {
+        int8[] b #= QueueContract.bytesOf("contract-release");
+        String id #= q.send(b, heap MessageAttributes(), 0L);
+        Received r1 #= q.receive(1, 300L);
+        QueueContract.check(r1.count() == 1, "release-first", "the message must be received first");
+        q.release(r1.messageAt(0).receipt(), 2L);
+        Received r2 #= q.receive(1, 300L);
+        QueueContract.check(r2.count() == 0, "release-delay", "a released message is not available before its delay");
+        w.pass(3L);
+        Received r3 #= q.receive(1, 300L);
+        QueueContract.check(r3.count() == 1, "release-returns", "a released message returns after its delay");
+        q.ack(r3.messageAt(0).receipt());
+        return;
+    }
+
+    static void batch(MessageQueue q, Waiter w) {
+        ArrayList<Outgoing> out = heap ArrayList<Outgoing>();
+        int8[] b1 #= QueueContract.bytesOf("batch-1");
+        int8[] b2 #= QueueContract.bytesOf("batch-2");
+        int8[] b3 #= QueueContract.bytesOf("batch-3");
+        out.add(heap Outgoing(#b1, heap MessageAttributes(), 0L));
+        out.add(heap Outgoing(#b2, heap MessageAttributes(), 0L));
+        out.add(heap Outgoing(#b3, heap MessageAttributes(), 0L));
+        String[] ids #= q.sendBatch(out);
+        QueueContract.check(ids.count() == 3, "batch-ids", "a batch send returns one id per message");
+        ArrayList<String> receipts = heap ArrayList<String>();
+        int32 got = 0;
+        int32 rounds = 0;
+        while (got < 3 && rounds < 10) {
+            Received r #= q.receive(10, 60L);
+            for (int32 i = 0; i < r.count(); i++) {
+                String rc = "" + r.messageAt(i).receipt();
+                receipts.add(#rc);
+                got = got + 1;
+            }
+            rounds = rounds + 1;
+        }
+        QueueContract.check(got == 3, "batch-receive", "every message of a batch must arrive; got " + got);
+        q.ackAll(receipts);
+        return;
+    }
+
+    static void delayed(MessageQueue q, Waiter w) {
+        if (!q.capabilities().supports(Caps.QUEUE_DELAYED_SEND())) return;
+        int8[] b #= QueueContract.bytesOf("contract-delayed");
+        String id #= q.send(b, heap MessageAttributes(), 2L);
+        Received r1 #= q.receive(10, 30L);
+        QueueContract.check(r1.count() == 0, "delayed-hidden", "a delayed message is not available before its delay");
+        w.pass(3L);
+        Received r2 #= q.receive(10, 30L);
+        QueueContract.check(r2.count() == 1, "delayed-arrives", "a delayed message arrives after its delay");
+        q.ack(r2.messageAt(0).receipt());
+        return;
+    }
+
+    static void fifo(MessageQueue q, Waiter w) {
+        if (!q.capabilities().supports(Caps.QUEUE_FIFO())) return;
+        for (int32 i = 0; i < 5; i++) {
+            int8[] b #= QueueContract.bytesOf("fifo-" + (int64) i);
+            String id #= q.send(b, heap MessageAttributes(), 0L);
+        }
+        Received r #= q.receive(5, 60L);
+        QueueContract.check(r.count() == 5, "fifo-all", "a FIFO queue delivers the five in one receive of five");
+        ArrayList<String> receipts = heap ArrayList<String>();
+        for (int32 i = 0; i < r.count(); i++) {
+            String want #= "fifo-" + (int64) i;
+            QueueContract.check(QueueContract.textOf(r.messageAt(i).body()).equals(want), "fifo-order", "a declared FIFO queue delivers in send order");
+            String rc = "" + r.messageAt(i).receipt();
+            receipts.add(#rc);
+        }
+        q.ackAll(receipts);
+        return;
+    }
+}

@@ -1,0 +1,24 @@
+package dev.cajeta.cloud.kv;
+
+import cajeta.lang.String;
+
+/** One stored value with its metadata, an opaque version, and its expiry (0 for none). */
+public final class KvEntry {
+    int8[] data;
+    String meta;
+    String ver;
+    int64 expires;
+
+    public KvEntry(#int8[] value, String metadata, String version, int64 expiresAtSeconds) {
+        this.data #= value;
+        this.meta = "" + metadata;
+        this.ver = "" + version;
+        this.expires = expiresAtSeconds;
+        return;
+    }
+
+    public int8[] value() { return this.data; }
+    public String metadata() { return this.meta; }
+    public String version() { return this.ver; }
+    public int64 expiresAtSeconds() { return this.expires; }
+}

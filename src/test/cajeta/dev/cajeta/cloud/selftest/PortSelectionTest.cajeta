@@ -1,0 +1,52 @@
+package dev.cajeta.cloud.selftest;
+
+import cajeta.lang.String;
+import dev.cajeta.unit.Assert;
+import dev.cajeta.cloud.Selection;
+import dev.cajeta.cloud.SelectionException;
+import dev.cajeta.cloud.kv.KeyValueSelector;
+import dev.cajeta.cloud.queue.QueueSelector;
+
+/**
+ * The selection rule the queue and key-value selectors share with identity
+ * (identity spec §9, plan 2.1.6): a configured name must be present; unset
+ * selects the only implementation, which must be the memory driver in a dev
+ * or test profile; everything else is refused naming the key.
+ */
+public class PortSelectionTest {
+
+    public PortSelectionTest() { return; }
+
+    static #String refusal(String key, String[] present, String configured, boolean development) {
+        try {
+            String chosen #= Selection.decide(key, present, configured, development);
+            String none = "selected " + chosen;
+            return #none;
+        } catch (SelectionException e) {
+            String m = "" + e.getMessage();
+            return #m;
+        }
+    }
+
+    @Test
+    public void theRuleNamesItsKey() {
+        String[] present = [ "memory" ];
+        String why #= PortSelectionTest.refusal("queue.provider", present, null, false);
+        Assert.isTrue(why.indexOf("queue.provider") >= 0);
+        String chosen #= Selection.decide("kv.provider", present, null, true);
+        Assert.isTrue(chosen.equals("memory"));
+        String[] two = [ "memory", "cloudflare" ];
+        String cf #= Selection.decide("kv.provider", two, "cloudflare", false);
+        Assert.isTrue(cf.equals("cloudflare"));
+        String unknown #= PortSelectionTest.refusal("kv.provider", two, "nope", true);
+        Assert.isTrue(unknown.indexOf("nope") >= 0 && unknown.indexOf("cloudflare") >= 0);
+        return;
+    }
+
+    @Test
+    public void eachSelectorHasItsOwnVariable() {
+        Assert.equals("QUEUE_PROVIDER", QueueSelector.ENV());
+        Assert.equals("KV_PROVIDER", KeyValueSelector.ENV());
+        return;
+    }
+}

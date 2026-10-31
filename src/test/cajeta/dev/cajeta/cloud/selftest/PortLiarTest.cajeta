@@ -1,0 +1,49 @@
+package dev.cajeta.cloud.selftest;
+
+import cajeta.lang.String;
+import dev.cajeta.unit.Assert;
+import dev.cajeta.cloud.CloudException;
+import dev.cajeta.cloud.identity.ManualTimeSource;
+import dev.cajeta.cloud.testkit.KeyValueContract;
+import dev.cajeta.cloud.testkit.ManualWaiter;
+import dev.cajeta.cloud.testkit.QueueContract;
+
+/**
+ * Plan 2.1.7: a queue that never redelivers, and a key-value store that
+ * declares conditional writes and always wins, are caught by their
+ * contracts, which name the check.
+ */
+public class PortLiarTest {
+
+    public PortLiarTest() { return; }
+
+    @Test
+    public void aQueueThatNeverRedeliversIsCaught() {
+        ManualTimeSource clock = heap ManualTimeSource(1700000000L);
+        LiarQueue q = heap LiarQueue(clock);
+        ManualWaiter w = heap ManualWaiter(clock);
+        String got = "";
+        try {
+            QueueContract.verify(q, w);
+        } catch (CloudException e) {
+            got = "" + e.message;
+        }
+        Assert.isTrue(got.indexOf("redelivery") >= 0);
+        return;
+    }
+
+    @Test
+    public void aStoreWhoseConditionalWritesAlwaysWinIsCaught() {
+        ManualTimeSource clock = heap ManualTimeSource(1700000000L);
+        LiarKeyValue kv = heap LiarKeyValue(clock);
+        ManualWaiter w = heap ManualWaiter(clock);
+        String got = "";
+        try {
+            KeyValueContract.verify(kv, w, "liar/");
+        } catch (CloudException e) {
+            got = "" + e.message;
+        }
+        Assert.isTrue(got.indexOf("conditional") >= 0);
+        return;
+    }
+}

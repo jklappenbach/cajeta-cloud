@@ -1,0 +1,31 @@
+package dev.cajeta.cloud.queue;
+
+import cajeta.lang.String;
+
+/** Package-private: one message in the memory queue. */
+final class Stored {
+    int8[] data;
+    MessageAttributes attrs;
+    String id;
+    int64 sentAt;
+    int64 visibleAt;
+    int32 attempts;
+    String receipt;      // null when no consumer holds it
+    int64 leaseUntil;
+
+    Stored(#int8[] body, #MessageAttributes attributes, #String id, int64 sentAt, int64 visibleAt) {
+        this.data #= body;
+        this.attrs #= attributes;
+        this.id #= id;
+        this.sentAt = sentAt;
+        this.visibleAt = visibleAt;
+        this.attempts = 0;
+        this.receipt = null;
+        this.leaseUntil = 0L;
+        return;
+    }
+
+    boolean held(int64 now) {
+        return this.receipt != null && this.leaseUntil > now;
+    }
+}

@@ -1,0 +1,161 @@
+package dev.cajeta.cloud.selftest;
+
+import cajeta.collection.ArrayList;
+import cajeta.lang.String;
+import dev.cajeta.unit.Assert;
+import dev.cajeta.cloud.Caps;
+import dev.cajeta.cloud.CloudException;
+import dev.cajeta.cloud.identity.ManualTimeSource;
+import dev.cajeta.cloud.queue.MemoryQueue;
+import dev.cajeta.cloud.queue.Message;
+import dev.cajeta.cloud.queue.MessageAttributes;
+import dev.cajeta.cloud.queue.Outgoing;
+import dev.cajeta.cloud.queue.Received;
+import dev.cajeta.cloud.testkit.ManualWaiter;
+import dev.cajeta.cloud.testkit.QueueContract;
+
+/**
+ * The queue port against the memory driver (cloudflare spec 5.1, plan 2.1.1,
+ * 2.1.2, 2.1.5): one consumer gets a message, a receipt holds it for its
+ * window, an acknowledged message is gone, a released or unacknowledged one
+ * comes back with its attempt count raised, an expired receipt fails its own
+ * way, a delayed send is invisible until its delay, and the full contract
+ * passes with the clock stepped, never slept.
+ */
+public class QueueTest {
+
+    public QueueTest() { return; }
+
+    static #int8[] body(String s) { return s.toBytes(); }
+
+    static #String text(int8[] b) {
+        int8[] copy = heap int8[(int64) b.count()];
+        int64 i = 0;
+        while (i < (int64) copy.count()) { copy[i] = b[i]; i = i + 1; }
+        String s = heap String(#copy, (int32) b.count());
+        return #s;
+    }
+
+    @Test
+    public void aMessageIsDeliveredOnceWhileItsReceiptHolds() {
+        ManualTimeSource clock = heap ManualTimeSource(1700000000L);
+        MemoryQueue q = heap MemoryQueue(clock);
+        MessageAttributes attrs = heap MessageAttributes();
+        attrs.add("kind", "greeting");
+        int8[] b #= QueueTest.body("hello");
+        String id #= q.send(b, attrs, 0L);
+        Assert.isTrue(id.byteLength() > 0);
+        Received r1 #= q.receive(10, 30L);
+        Assert.equals(1L, (int64) r1.count());
+        Message m = r1.messageAt(0);
+        Assert.equals("hello", QueueTest.text(m.body()));
+        Assert.equals("greeting", m.attributes().get("kind"));
+        Assert.isTrue(m.attempt() == 1);
+        Assert.isTrue(m.sentAtSeconds() == 1700000000L);
+        Assert.isTrue(m.receipt().byteLength() > 0);
+        // A second consumer inside the window sees nothing.
+        Received r2 #= q.receive(10, 30L);
+        Assert.equals(0L, (int64) r2.count());
+        q.ack(m.receipt());
+        clock.advance(60L);
+        Received r3 #= q.receive(10, 30L);
+        Assert.equals(0L, (int64) r3.count());
+        return;
+    }
+
+    @Test
+    public void anUnacknowledgedMessageComesBackWithItsAttemptRaised() {
+        ManualTimeSource clock = heap ManualTimeSource(1700000000L);
+        MemoryQueue q = heap MemoryQueue(clock);
+        int8[] b #= QueueTest.body("retry me");
+        String id #= q.send(b, heap MessageAttributes(), 0L);
+        Received r1 #= q.receive(1, 30L);
+        Assert.isTrue(r1.messageAt(0).attempt() == 1);
+        clock.advance(31L);
+        Received r2 #= q.receive(1, 30L);
+        Assert.equals(1L, (int64) r2.count());
+        Assert.isTrue(r2.messageAt(0).attempt() == 2);
+        // The first receipt is dead: acknowledging through it fails its own way.
+        int32 kind = -1;
+        try {
+            q.ack(r1.messageAt(0).receipt());
+        } catch (CloudException e) {
+            kind = e.kind();
+        }
+        Assert.isTrue(kind == CloudException.PRECONDITION_FAILED());
+        q.ack(r2.messageAt(0).receipt());
+        return;
+    }
+
+    @Test
+    public void aReleasedMessageReturnsAfterItsDelay() {
+        ManualTimeSource clock = heap ManualTimeSource(1700000000L);
+        MemoryQueue q = heap MemoryQueue(clock);
+        int8[] b #= QueueTest.body("later");
+        String id #= q.send(b, heap MessageAttributes(), 0L);
+        Received r1 #= q.receive(1, 300L);
+        q.release(r1.messageAt(0).receipt(), 20L);
+        Received r2 #= q.receive(1, 300L);
+        Assert.equals(0L, (int64) r2.count());
+        clock.advance(20L);
+        Received r3 #= q.receive(1, 300L);
+        Assert.equals(1L, (int64) r3.count());
+        Assert.isTrue(r3.messageAt(0).attempt() == 2);
+        return;
+    }
+
+    @Test
+    public void aDelayedSendAndABatchSend() {
+        ManualTimeSource clock = heap ManualTimeSource(1700000000L);
+        MemoryQueue q = heap MemoryQueue(clock);
+        int8[] b #= QueueTest.body("not yet");
+        String id #= q.send(b, heap MessageAttributes(), 10L);
+        Received r1 #= q.receive(10, 30L);
+        Assert.equals(0L, (int64) r1.count());
+        clock.advance(10L);
+        Received r2 #= q.receive(10, 30L);
+        Assert.equals(1L, (int64) r2.count());
+        q.ack(r2.messageAt(0).receipt());
+        ArrayList<Outgoing> batch = heap ArrayList<Outgoing>();
+        int8[] b1 #= QueueTest.body("one");
+        int8[] b2 #= QueueTest.body("two");
+        batch.add(heap Outgoing(#b1, heap MessageAttributes(), 0L));
+        batch.add(heap Outgoing(#b2, heap MessageAttributes(), 0L));
+        String[] ids #= q.sendBatch(batch);
+        Assert.equals(2L, (int64) ids.count());
+        Received r3 #= q.receive(10, 30L);
+        Assert.equals(2L, (int64) r3.count());
+        ArrayList<String> receipts = heap ArrayList<String>();
+        String ra = "" + r3.messageAt(0).receipt();
+        String rb = "" + r3.messageAt(1).receipt();
+        receipts.add(#ra);
+        receipts.add(#rb);
+        q.ackAll(receipts);
+        clock.advance(60L);
+        Received r4 #= q.receive(10, 30L);
+        Assert.equals(0L, (int64) r4.count());
+        return;
+    }
+
+    @Test
+    public void theMemoryDriverDeclaresWhatItHasAndRefusesTheRest() {
+        ManualTimeSource clock = heap ManualTimeSource(1700000000L);
+        MemoryQueue q = heap MemoryQueue(clock);
+        Assert.isTrue(q.capabilities().supports(Caps.QUEUE_DELAYED_SEND()));
+        Assert.isTrue(!q.capabilities().supports(Caps.QUEUE_FIFO()));
+        Assert.isTrue(!q.capabilities().supports(Caps.QUEUE_EXACTLY_ONCE()));
+        Assert.isTrue(!q.capabilities().supports(Caps.QUEUE_MESSAGE_GROUPS()));
+        String name #= q.capabilities().adapterName();
+        Assert.equals("memory-queue", name);
+        return;
+    }
+
+    @Test
+    public void theContractHoldsWithTheClockStepped() {
+        ManualTimeSource clock = heap ManualTimeSource(1700000000L);
+        MemoryQueue q = heap MemoryQueue(clock);
+        ManualWaiter w = heap ManualWaiter(clock);
+        QueueContract.verify(q, w);
+        return;
+    }
+}

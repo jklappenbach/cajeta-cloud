@@ -1,0 +1,199 @@
+package dev.cajeta.cloud.testkit;
+
+import cajeta.lang.String;
+import dev.cajeta.cloud.Capabilities;
+import dev.cajeta.cloud.Caps;
+import dev.cajeta.cloud.CloudException;
+import dev.cajeta.cloud.kv.KeyValueStore;
+import dev.cajeta.cloud.kv.KvCondResult;
+import dev.cajeta.cloud.kv.KvEntry;
+import dev.cajeta.cloud.kv.KvListPage;
+import dev.cajeta.cloud.kv.PutOptions;
+
+/**
+ * The key-value port's conformance suite (cajeta-cloud-cloudflare spec 6.1,
+ * parent §10): a value and its metadata round-trip, absence is null, delete
+ * reports, expiry removes, listing under a prefix is complete behind the
+ * cursor, conditional writes lose when they should where declared and
+ * refuse cleanly where not, and reads follow the declared consistency
+ * model: at once when strong, within `propagationBoundSeconds()` when
+ * eventual. Time passes through the {@link Waiter}. A violation throws a
+ * CloudException whose operation is the check id.
+ */
+public final class KeyValueContract {
+
+    static void fail(String check, String detail) {
+        throw heap CloudException(CloudException.PROVIDER_ERROR(), "contract", check, "-",
+            check + ": " + detail);
+    }
+
+    static void check(boolean ok, String checkId, String detail) {
+        if (!ok) { KeyValueContract.fail(checkId, detail); }
+        return;
+    }
+
+    static #int8[] bytesOf(String s) { return s.toBytes(); }
+
+    static #String textOf(int8[] b) {
+        int8[] copy = heap int8[(int64) b.count()];
+        int64 i = 0;
+        while (i < (int64) copy.count()) { copy[i] = b[i]; i = i + 1; }
+        String s = heap String(#copy, (int32) b.count());
+        return #s;
+    }
+
+    // Let a write propagate under the declared model.
+    static void settle(KeyValueStore kv, Waiter w) {
+        int64 bound = kv.propagationBoundSeconds();
+        if (bound > 0L) w.pass(bound);
+        return;
+    }
+
+    public static void verify(KeyValueStore kv, Waiter w, String prefix) {
+        KeyValueContract.roundtrip(kv, w, prefix);
+        KeyValueContract.expiry(kv, w, prefix);
+        KeyValueContract.listing(kv, w, prefix);
+        KeyValueContract.conditional(kv, w, prefix);
+        KeyValueContract.consistency(kv, w, prefix);
+        return;
+    }
+
+    static void roundtrip(KeyValueStore kv, Waiter w, String prefix) {
+        Capabilities caps = kv.capabilities();
+        int8[] v #= KeyValueContract.bytesOf("contract-v1");
+        PutOptions o = heap PutOptions();
+        boolean meta = caps.supports(Caps.KV_METADATA());
+        if (meta) o.metadata("m1");
+        kv.put(prefix + "rt", v, o);
+        KeyValueContract.settle(kv, w);
+        KvEntry e #= kv.get(prefix + "rt");
+        KeyValueContract.check(e != null, "roundtrip-present", "a put key must read back");
+        KeyValueContract.check(KeyValueContract.textOf(e.value()).equals("contract-v1"), "roundtrip", "get must return the exact bytes put");
+        KeyValueContract.check(e.version().byteLength() > 0, "version", "an entry carries a version");
+        if (meta) KeyValueContract.check(e.metadata().equals("m1"), "metadata", "metadata must round-trip where declared");
+        KvEntry none #= kv.get(prefix + "absent");
+        KeyValueContract.check(none == null, "absence", "an absent key reads as null");
+        KeyValueContract.check(!kv.delete(prefix + "absent"), "delete-reports", "delete must report the key was absent");
+        KeyValueContract.check(kv.delete(prefix + "rt"), "delete-reports", "delete must report the key existed");
+        KeyValueContract.settle(kv, w);
+        KvEntry gone #= kv.get(prefix + "rt");
+        KeyValueContract.check(gone == null, "delete-removes", "a deleted key must read as absent");
+        return;
+    }
+
+    static void expiry(KeyValueStore kv, Waiter w, String prefix) {
+        if (!kv.capabilities().supports(Caps.KV_EXPIRY())) return;
+        int8[] v #= KeyValueContract.bytesOf("ttl");
+        PutOptions o = heap PutOptions();
+        // The life must outlast the propagation bound, or an eventual store's
+        // key is expired by the time it is readable.
+        o.timeToLive(2L + kv.propagationBoundSeconds());
+        kv.put(prefix + "ttl", v, o);
+        KeyValueContract.settle(kv, w);
+        KvEntry e #= kv.get(prefix + "ttl");
+        KeyValueContract.check(e != null, "expiry-before", "a key with a time to live reads back before it passes");
+        w.pass(3L);
+        KvEntry after #= kv.get(prefix + "ttl");
+        KeyValueContract.check(after == null, "expiry-removes", "a key past its expiry reads as absent");
+        return;
+    }
+
+    static void listing(KeyValueStore kv, Waiter w, String prefix) {
+        int8[] v #= KeyValueContract.bytesOf("l");
+        PutOptions o = heap PutOptions();
+        kv.put(prefix + "list/a", v, o);
+        kv.put(prefix + "list/b", v, o);
+        kv.put(prefix + "list/c", v, o);
+        kv.put(prefix + "other", v, o);
+        KeyValueContract.settle(kv, w);
+        int32 seenA = 0;
+        int32 seenB = 0;
+        int32 seenC = 0;
+        int32 total = 0;
+        String cursor #= "" + "";
+        int32 pages = 0;
+        boolean more = true;
+        while (more && pages < 10) {
+            KvListPage p #= kv.list(prefix + "list/", cursor, 2L);
+            KeyValueContract.check(p.count() <= 2, "list-limit", "a page holds at most the limit");
+            for (int32 i = 0; i < p.count(); i++) {
+                String k = p.keyAt(i);
+                KeyValueContract.check(k.startsWith(prefix + "list/"), "list-prefix", "every listed key carries the prefix");
+                if (k.equals(prefix + "list/a")) seenA = seenA + 1;
+                if (k.equals(prefix + "list/b")) seenB = seenB + 1;
+                if (k.equals(prefix + "list/c")) seenC = seenC + 1;
+                total = total + 1;
+            }
+            cursor #= "" + p.cursor();
+            more = cursor.byteLength() > 0;
+            pages = pages + 1;
+        }
+        KeyValueContract.check(seenA == 1 && seenB == 1 && seenC == 1 && total == 3, "list-complete",
+            "listing under the prefix yields each key once and nothing else; got " + total);
+        boolean d1 = kv.delete(prefix + "list/a");
+        boolean d2 = kv.delete(prefix + "list/b");
+        boolean d3 = kv.delete(prefix + "list/c");
+        boolean d4 = kv.delete(prefix + "other");
+        return;
+    }
+
+    static void conditional(KeyValueStore kv, Waiter w, String prefix) {
+        Capabilities caps = kv.capabilities();
+        int8[] v1 #= KeyValueContract.bytesOf("c1");
+        int8[] v2 #= KeyValueContract.bytesOf("c2");
+        PutOptions o = heap PutOptions();
+        if (caps.supports(Caps.KV_CONDITIONAL_CREATE())) {
+            KvCondResult r1 #= kv.putIfAbsent(prefix + "cond", v1, o);
+            KeyValueContract.check(r1.won, "conditional-create-wins", "the first conditional create wins");
+            KvCondResult r2 #= kv.putIfAbsent(prefix + "cond", v2, o);
+            KeyValueContract.check(!r2.won, "conditional-create-loses", "a conditional create on a present key must lose");
+            KeyValueContract.check(r2.version.equals(r1.version), "conditional-loser-version", "the loser is told the current version");
+            if (caps.supports(Caps.KV_COMPARE_AND_SET())) {
+                KvCondResult r3 #= kv.compareAndSet(prefix + "cond", "not-the-version", v2, o);
+                KeyValueContract.check(!r3.won, "conditional-cas-loses", "a compare-and-set with a stale version must lose");
+                KvCondResult r4 #= kv.compareAndSet(prefix + "cond", r1.version, v2, o);
+                KeyValueContract.check(r4.won, "conditional-cas-wins", "a compare-and-set with the current version wins");
+                KeyValueContract.settle(kv, w);
+                KvEntry e #= kv.get(prefix + "cond");
+                KeyValueContract.check(e != null && KeyValueContract.textOf(e.value()).equals("c2"), "conditional-cas-stored", "the winning value is stored");
+            }
+            boolean deleted = kv.delete(prefix + "cond");
+        } else {
+            boolean refused = false;
+            try {
+                KvCondResult r #= kv.putIfAbsent(prefix + "cond", v1, o);
+            } catch (CloudException e) {
+                refused = e.message.indexOf(Caps.KV_CONDITIONAL_CREATE()) >= 0L;
+            }
+            KeyValueContract.check(refused, "conditional-refusal", "putIfAbsent without the capability must fail naming it (§3.2)");
+        }
+        if (!caps.supports(Caps.KV_COMPARE_AND_SET())) {
+            boolean refused = false;
+            try {
+                KvCondResult r #= kv.compareAndSet(prefix + "cond", "x", v1, o);
+            } catch (CloudException e) {
+                refused = e.message.indexOf(Caps.KV_COMPARE_AND_SET()) >= 0L;
+            }
+            KeyValueContract.check(refused, "conditional-refusal", "compareAndSet without the capability must fail naming it (§3.2)");
+        }
+        return;
+    }
+
+    static void consistency(KeyValueStore kv, Waiter w, String prefix) {
+        int8[] v #= KeyValueContract.bytesOf("fresh");
+        PutOptions o = heap PutOptions();
+        kv.put(prefix + "cons", v, o);
+        if (kv.capabilities().supports(Caps.KV_STRONG_CONSISTENCY())) {
+            KeyValueContract.check(kv.propagationBoundSeconds() == 0L, "strong-bound", "a strong store declares a zero bound");
+            KvEntry e #= kv.get(prefix + "cons");
+            KeyValueContract.check(e != null && KeyValueContract.textOf(e.value()).equals("fresh"), "read-after-write", "a strong store reads its write at once");
+        } else {
+            KeyValueContract.check(kv.propagationBoundSeconds() > 0L, "eventual-bound", "an eventual store declares its propagation bound");
+            w.pass(kv.propagationBoundSeconds());
+            KvEntry e #= kv.get(prefix + "cons");
+            KeyValueContract.check(e != null && KeyValueContract.textOf(e.value()).equals("fresh"), "eventual-within-bound", "an eventual store reads its write within the declared bound");
+        }
+        boolean deleted = kv.delete(prefix + "cons");
+        return;
+    }
+}

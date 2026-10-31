@@ -1,0 +1,15 @@
+package dev.cajeta.cloud.kv;
+
+import cajeta.lang.String;
+
+/** The outcome of a conditional write: whether it won, and the version now stored (the loser is told the current one). */
+public final class KvCondResult {
+    public boolean won;
+    public String version;
+
+    public KvCondResult(boolean won, #String version) {
+        this.won = won;
+        this.version #= version;
+        return;
+    }
+}
