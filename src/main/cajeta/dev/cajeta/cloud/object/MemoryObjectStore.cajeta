@@ -20,7 +20,10 @@ import dev.cajeta.cloud.CloudStats;
  * Timestamps are LOGICAL (a monotonic sequence shared with etags).
  * All mutable state lives in {@link MemState}, which writers and
  * multipart uploads share directly — see MemState for why.
+ *
+ * It is the `memory` component, so `ObjectStoreSelector` finds it.
  */
+@Component(name = "memory")
 public final class MemoryObjectStore implements ObjectStore {
 
     MemState st;

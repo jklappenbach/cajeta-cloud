@@ -69,6 +69,12 @@ promises lexicographic order (§5.4).
 Position semantics worth knowing: `put`/`putIfAbsent`/`putIfMatch`
 return the new version token; `stat` and `list` carry the current one.
 
+`ObjectStoreSelector` picks the provider by the identity port's rule.
+`OBJECT_STORE_PROVIDER` names it, or an `ObjectStoreConfig` component does,
+and code wins over the environment. `MemoryObjectStore` is the `memory`
+component, so a test or dev build with no adapter compiled in runs on it
+with nothing configured.
+
 ## The stream port — `dev.cajeta.cloud.stream`
 
 `EventStream` covers what Kafka, Kinesis, Pub/Sub, and Event Hubs
@@ -236,7 +242,8 @@ Each message goes to one consumer, held by receipt for a visibility window;
 message is delivered again with its attempt count raised. At least once,
 unordered; FIFO, exactly-once and message groups are capabilities. `MemoryQueue`
 runs on an injectable clock; `QueueContract` is the conformance suite;
-`QueueSelector` picks the provider (`QUEUE_PROVIDER` or a `QueueConfig`). Skill:
+`QueueSelector` picks the provider (`QUEUE_PROVIDER` or a `QueueConfig`), and
+`MemoryQueue` is its `memory` component on the system clock. Skill:
 `cloud-queue`. Spec: `cajeta-cloud-cloudflare` §5.1.
 
 ## The key-value port — `dev.cajeta.cloud.kv`
@@ -246,8 +253,8 @@ cursor, and conditional writes where declared. The consistency model is
 declared too: strong, or eventual within `propagationBoundSeconds()`.
 `MemoryKeyValue` is strong by default and `MemoryKeyValue.eventual(clock, lag)`
 models a store like Workers KV; `KeyValueContract` is the conformance suite;
-`KeyValueSelector` picks the provider (`KV_PROVIDER` or a `KeyValueConfig`).
-Skill: `cloud-key-value`. Spec: `cajeta-cloud-cloudflare` §6.1.
+`KeyValueSelector` picks the provider (`KV_PROVIDER` or a `KeyValueConfig`),
+and `MemoryKeyValue` is its strong `memory` component. Skill: `cloud-key-value`. Spec: `cajeta-cloud-cloudflare` §6.1.
 
 ## Capability negotiation — `Capabilities` / `Caps`
 

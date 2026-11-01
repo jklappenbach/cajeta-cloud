@@ -221,3 +221,48 @@ selection_case env-prod     ""          memory "selected memory"            app
 selection_case env-two      ""          stub   "selected stub"              app stub
 selection_case code-wins    pick-stub   memory "selected stub"              app stub config
 [[ "$sel_fail" == 0 ]] || { echo "identity selection fixtures failed" >&2; exit 1; }
+
+# --- data-port selection (cajeta-cloud-cloudflare 7.1.3) -----------------
+# The object store, queue and key-value selectors under the same rule: the
+# memory drivers are `memory` components, so a test build needs nothing
+# configured, a production build must name each provider, and a config
+# component beats the environment. The env column is a list of VAR=value.
+echo ">> data-port selection fixtures"
+port_fail=0
+ports_case() {
+    local label="$1" profile="$2" envs="$3" expect="$4"; shift 4
+    local root="$out/port-$label"
+    mkdir -p "$root/src" "$root/out"
+    for part in "$@"; do cp -r "$sel/$part/." "$root/src/"; done
+    local pflag=()
+    [[ -n "$profile" ]] && pflag=(--profile="$profile")
+    if ! "$CAJETA" --emit=exe "${pflag[@]}" --classpath="$out/cloud.cja,$crypto_cja" \
+            -o "$root/prog" dev.cajeta.cloud.portfix.Main.run \
+            "$root/src" "$root/out" > "$root/build.log" 2>&1; then
+        echo "  FAIL $label: build failed"; sed -n '1,20p' "$root/build.log"
+        port_fail=1; return
+    fi
+    local got
+    # shellcheck disable=SC2086
+    got="$(env -u OBJECT_STORE_PROVIDER -u QUEUE_PROVIDER -u KV_PROVIDER $envs "$root/prog" 2>&1 || true)"
+    local frag
+    IFS='|' read -ra frags <<< "$expect"
+    for frag in "${frags[@]}"; do
+        if [[ "$got" != *"$frag"* ]]; then
+            echo "  FAIL $label: expected '$frag' in: $got"
+            port_fail=1; return
+        fi
+    done
+    echo "  ok   $label: $(printf '%s' "$got" | tr '\n' ';')"
+}
+ports_case test      test        "" \
+    "objectstore memory 1|queue memory 1|kv memory 3" ports
+ports_case prod      ""          "" \
+    "objectstore refused:|objectstore.provider|queue refused:|queue.provider|kv refused:|kv.provider" ports
+ports_case env-prod  ""          "OBJECT_STORE_PROVIDER=memory QUEUE_PROVIDER=memory KV_PROVIDER=memory" \
+    "objectstore memory 1|queue memory 1|kv memory 3" ports
+ports_case env-nope  ""          "OBJECT_STORE_PROVIDER=nope QUEUE_PROVIDER=nope KV_PROVIDER=nope" \
+    "objectstore refused:|nope|memory|queue refused:|kv refused:" ports
+ports_case code-wins pick-memory "OBJECT_STORE_PROVIDER=nope QUEUE_PROVIDER=nope KV_PROVIDER=nope" \
+    "objectstore memory 1|queue memory 1|kv memory 3" ports portconfig
+[[ "$port_fail" == 0 ]] || { echo "data-port selection fixtures failed" >&2; exit 1; }

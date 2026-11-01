@@ -1,0 +1,72 @@
+package dev.cajeta.cloud.portfix;
+
+import cajeta.lang.String;
+import cajeta.lang.System;
+import dev.cajeta.cloud.SelectionException;
+import dev.cajeta.cloud.kv.KeyValueSelector;
+import dev.cajeta.cloud.kv.KeyValueStore;
+import dev.cajeta.cloud.kv.KvEntry;
+import dev.cajeta.cloud.kv.PutOptions;
+import dev.cajeta.cloud.object.ObjectStore;
+import dev.cajeta.cloud.object.ObjectStoreSelector;
+import dev.cajeta.cloud.queue.MessageAttributes;
+import dev.cajeta.cloud.queue.MessageQueue;
+import dev.cajeta.cloud.queue.QueueSelector;
+import dev.cajeta.cloud.queue.Received;
+
+/**
+ * A consumer of the three data ports: each selector is injected, and the
+ * selected driver takes one write and reads it back. One line a port.
+ */
+public class Main {
+    static void objectStore() {
+        try {
+            ObjectStoreSelector s = ObjectStoreSelector.__cajeta_inject();
+            ObjectStore store = s.store();
+            int8[] put #= "a".toBytes();
+            String etag #= store.put("k", put, "text/plain");
+            int8[] got #= store.get("k");
+            System.stdout.println("objectstore " + s.provider() + " " + got.count());
+        } catch (SelectionException e) {
+            System.stdout.println("objectstore refused: " + e.getMessage());
+        }
+        return;
+    }
+
+    static void queue() {
+        try {
+            QueueSelector s = QueueSelector.__cajeta_inject();
+            MessageQueue q = s.queue();
+            int8[] body #= "ab".toBytes();
+            MessageAttributes attrs = heap MessageAttributes();
+            String id #= q.send(body, attrs, 0L);
+            Received r #= q.receive(1, 30L);
+            System.stdout.println("queue " + s.provider() + " " + r.count());
+        } catch (SelectionException e) {
+            System.stdout.println("queue refused: " + e.getMessage());
+        }
+        return;
+    }
+
+    static void keyValue() {
+        try {
+            KeyValueSelector s = KeyValueSelector.__cajeta_inject();
+            KeyValueStore kv = s.store();
+            int8[] v #= "abc".toBytes();
+            PutOptions o = heap PutOptions();
+            kv.put("k", v, o);
+            KvEntry e #= kv.get("k");
+            System.stdout.println("kv " + s.provider() + " " + e.value().count());
+        } catch (SelectionException e) {
+            System.stdout.println("kv refused: " + e.getMessage());
+        }
+        return;
+    }
+
+    public static int32 run() {
+        Main.objectStore();
+        Main.queue();
+        Main.keyValue();
+        return 0;
+    }
+}

@@ -8,6 +8,7 @@ import dev.cajeta.cloud.Capabilities;
 import dev.cajeta.cloud.Caps;
 import dev.cajeta.cloud.CloudException;
 import dev.cajeta.cloud.CloudStats;
+import dev.cajeta.cloud.identity.SystemTimeSource;
 import dev.cajeta.cloud.identity.TimeSource;
 
 /**
@@ -16,16 +17,35 @@ import dev.cajeta.cloud.identity.TimeSource;
  * all on an injected clock so a test steps time instead of sleeping. One lock
  * serializes it, so two consumers never hold one message. Declares
  * `queue.delayed-send` and nothing Kafka- or SQS-FIFO-shaped.
+ *
+ * It is the `memory` component on the system clock, so `QueueSelector`
+ * finds it.
  */
+@Component(name = "memory")
 public final class MemoryQueue implements MessageQueue {
     Lock lock;
     ArrayList<Stored> messages;
     int64 seq;
     TimeSource clock;
+    TimeSource ownClock;
     Capabilities caps;
     CloudStats statsObj;
 
+    /** The `memory` component: a queue on the system clock, which it owns. */
+    public MemoryQueue() {
+        this.ownClock = heap SystemTimeSource();
+        this.setup(this.ownClock);
+        return;
+    }
+
+    /** A queue on `clock`, which must outlive it. */
     public MemoryQueue(^TimeSource clock) {
+        this.ownClock = null;
+        this.setup(clock);
+        return;
+    }
+
+    private void setup(^TimeSource clock) {
         this.lock = heap Lock();
         this.messages = heap ArrayList<Stored>();
         this.seq = 0L;

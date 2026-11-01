@@ -1,0 +1,57 @@
+package dev.cajeta.cloud.object;
+
+import cajeta.collection.ArrayList;
+import cajeta.collection.HashMap;
+import cajeta.lang.String;
+import cajeta.collection.Collectors;
+import dev.cajeta.cloud.Selection;
+import dev.cajeta.cloud.identity.DevelopmentProfile;
+
+/**
+ * Chooses the `ObjectStore` a program uses, by the identity port's rule
+ * (identity spec §9, `Selection.decide`): every compiled-in implementation
+ * arrives as a named component, `objectstore.provider` names one (an `ObjectStoreConfig`
+ * component, else `OBJECT_STORE_PROVIDER`), and the build's profile decides whether
+ * the memory driver may stand in unnamed.
+ */
+@Component
+public final class ObjectStoreSelector {
+
+    @Inject HashMap<String, ObjectStore> stores;
+    @Inject ArrayList<ObjectStoreConfig> config;
+    @Inject ArrayList<DevelopmentProfile> development;
+
+    String chosen;
+
+    public ObjectStoreSelector() {
+        this.chosen = null;
+        return;
+    }
+
+    @PostConstruct
+    public void select() {
+        ArrayList<String> names #= this.stores.keys().collect(Collectors.toList<String>());
+        int32 n = (int32) names.count();
+        String[] present = heap String[n];
+        int32 i = 0;
+        while (i < n) {
+            present[i] #= names.get(i);
+            i = i + 1;
+        }
+        String configured = null;
+        if (this.config.count() > 0) {
+            configured = this.config.get(0).provider();
+        }
+        if (configured == null || configured.byteLength() == 0) {
+            configured = System.env.get(ObjectStoreSelector.ENV());
+        }
+        this.chosen #= Selection.decide("objectstore.provider", present, configured, this.development.count() > 0);
+        return;
+    }
+
+    public static String ENV() { return "OBJECT_STORE_PROVIDER"; }
+
+    public String provider() { return this.chosen; }
+
+    public ObjectStore store() { return this.stores.get(this.chosen); }
+}

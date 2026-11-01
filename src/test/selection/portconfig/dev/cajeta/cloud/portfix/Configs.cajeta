@@ -1,0 +1,28 @@
+package dev.cajeta.cloud.portfix;
+
+import cajeta.lang.String;
+import dev.cajeta.cloud.kv.KeyValueConfig;
+import dev.cajeta.cloud.object.ObjectStoreConfig;
+import dev.cajeta.cloud.queue.QueueConfig;
+
+/** Every data port names `memory` in the pick-memory profile, which is not a test or dev profile. */
+@Component
+@Profile("pick-memory")
+public final class PickMemoryObjects implements ObjectStoreConfig {
+    public PickMemoryObjects() { return; }
+    public String provider() { return "memory"; }
+}
+
+@Component
+@Profile("pick-memory")
+public final class PickMemoryQueue implements QueueConfig {
+    public PickMemoryQueue() { return; }
+    public String provider() { return "memory"; }
+}
+
+@Component
+@Profile("pick-memory")
+public final class PickMemoryKv implements KeyValueConfig {
+    public PickMemoryKv() { return; }
+    public String provider() { return "memory"; }
+}

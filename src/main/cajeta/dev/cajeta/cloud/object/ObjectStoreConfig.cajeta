@@ -1,0 +1,13 @@
+package dev.cajeta.cloud.object;
+
+import cajeta.lang.String;
+
+/**
+ * `objectstore.provider` set in code: which compiled-in `ObjectStore` to use.
+ * The `OBJECT_STORE_PROVIDER` environment variable names it otherwise; a
+ * component of this type overrides the environment when its `provider()`
+ * returns a name, and null defers to it (identity spec §9.2).
+ */
+public interface ObjectStoreConfig {
+    String provider();
+}

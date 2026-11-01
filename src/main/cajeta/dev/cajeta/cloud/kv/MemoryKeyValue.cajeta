@@ -8,6 +8,7 @@ import dev.cajeta.cloud.Capabilities;
 import dev.cajeta.cloud.Caps;
 import dev.cajeta.cloud.CloudException;
 import dev.cajeta.cloud.CloudStats;
+import dev.cajeta.cloud.identity.SystemTimeSource;
 import dev.cajeta.cloud.identity.TimeSource;
 
 /**
@@ -17,7 +18,11 @@ import dev.cajeta.cloud.identity.TimeSource;
  * only `lag` seconds later, so code written against an eventually consistent
  * store (Workers KV) can be tested for stale reads; conditional writes still
  * decide on the latest state.
+ *
+ * It is the `memory` component, strong and on the system clock, so
+ * `KeyValueSelector` finds it.
  */
+@Component(name = "memory")
 public final class MemoryKeyValue implements KeyValueStore {
     Lock lock;
     ArrayList<String> keys;      // sorted, bytewise
@@ -25,10 +30,20 @@ public final class MemoryKeyValue implements KeyValueStore {
     int64 seq;
     int64 lag;
     TimeSource clock;
+    TimeSource ownClock;
     Capabilities caps;
     CloudStats statsObj;
 
+    /** The `memory` component: a strong store on the system clock, which it owns. */
+    public MemoryKeyValue() {
+        this.ownClock = heap SystemTimeSource();
+        this.setup(this.ownClock, 0L);
+        return;
+    }
+
+    /** A strong store on `clock`, which must outlive it. */
     public MemoryKeyValue(^TimeSource clock) {
+        this.ownClock = null;
         this.setup(clock, 0L);
         return;
     }
