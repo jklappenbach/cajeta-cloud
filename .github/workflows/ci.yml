@@ -80,7 +80,7 @@ env:
   # Raised to v0.41.0 with identity selection (identity plan Unit 2).
   # Raised to v0.44.0, the first release without the stdlib crypto (crypto plan Unit 8).
   # Raised to v0.48.0 with the queue and key-value ports (cloud-cloudflare plan Unit 2).
-  CAJETA_VERSION: v0.48.0
+  CAJETA_VERSION: v0.50.0
 
 jobs:
   build-test:
